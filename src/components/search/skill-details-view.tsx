@@ -148,6 +148,11 @@ function normalizeSkillDetailsResponse(payload: unknown): NormalizedSkillDetails
   return { skill, selectedRelease: null, releases: [] };
 }
 
+function extractReleaseFromPayload(payload: unknown): SkillRelease | null {
+  if (!isObject(payload)) return null;
+  return toRelease(payload.release);
+}
+
 function getCached<T>(key: string): T | null {
   try {
     const cachedRaw = localStorage.getItem(key);
@@ -223,20 +228,48 @@ export default function SkillDetailsView({
       try {
         const encodedNamespace = encodeURIComponent(namespace);
         const encodedSlug = encodeURIComponent(slug);
-        const path = version
-          ? `/v1/skills/${encodedNamespace}/${encodedSlug}/releases/${encodeURIComponent(version)}`
-          : `/v1/skills/${encodedNamespace}/${encodedSlug}`;
-        const response = await fetch(
-          buildApiUrl(path),
-        );
-        if (!response.ok) {
-          throw new Error(`Failed with ${response.status}`);
+        const skillPath = `/v1/skills/${encodedNamespace}/${encodedSlug}`;
+
+        let parsed: NormalizedSkillDetails | null = null;
+        if (version) {
+          const releasePath = `${skillPath}/releases/${encodeURIComponent(version)}`;
+          const [skillResponse, releaseResponse] = await Promise.all([
+            fetch(buildApiUrl(skillPath)),
+            fetch(buildApiUrl(releasePath)),
+          ]);
+
+          if (!skillResponse.ok || !releaseResponse.ok) {
+            throw new Error(
+              `Failed with skill=${skillResponse.status} release=${releaseResponse.status}`,
+            );
+          }
+
+          const [skillRaw, releaseRaw] = (await Promise.all([
+            skillResponse.json(),
+            releaseResponse.json(),
+          ])) as [unknown, unknown];
+          const base = normalizeSkillDetailsResponse(skillRaw);
+          const selectedRelease = extractReleaseFromPayload(releaseRaw);
+          if (!base || !selectedRelease) {
+            throw new Error("Unexpected response shape");
+          }
+          parsed = {
+            skill: base.skill,
+            releases: base.releases,
+            selectedRelease,
+          };
+        } else {
+          const response = await fetch(buildApiUrl(skillPath));
+          if (!response.ok) {
+            throw new Error(`Failed with ${response.status}`);
+          }
+          const parsedRaw = (await response.json()) as unknown;
+          parsed = normalizeSkillDetailsResponse(parsedRaw);
+          if (!parsed) {
+            throw new Error("Unexpected response shape");
+          }
         }
-        const parsedRaw = (await response.json()) as unknown;
-        const parsed = normalizeSkillDetailsResponse(parsedRaw);
-        if (!parsed) {
-          throw new Error("Unexpected response shape");
-        }
+
         setCached(cacheKey, parsed);
         if (!isCancelled) {
           setData(parsed);
