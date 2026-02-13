@@ -8,7 +8,13 @@ import { buildApiUrl } from "@/lib/api";
 const SKILL_DETAILS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SKILL_DETAILS_CACHE_KEY_PREFIX = "skill-details-page-cache-v1";
 
-type SkillDetailsResponse = {
+type DownloadStats = {
+  total: number;
+  last_week: number;
+  last_month: number;
+};
+
+type SkillSummary = {
   skill: {
     namespace: string;
     slug: string;
@@ -18,33 +24,129 @@ type SkillDetailsResponse = {
     tags: string[];
     created_at: string;
     updated_at: string;
-    download_stats: {
-      total: number;
-      last_week: number;
-      last_month: number;
-    };
+    download_stats: DownloadStats;
   };
-  latest_release: {
-    version: string;
-    status: string;
-    created_at: string;
-    published_at: string | null;
-    manifest?: Record<string, unknown>;
-    dependencies?: Array<{
-      id: string;
-      namespace: string;
-      slug: string;
-      version_requirement: string;
-      release_version: string | null;
-    }>;
-  } | null;
-  releases: Array<{
-    version: string;
-    status: string;
-    created_at: string;
-    published_at: string | null;
-  }>;
 };
+
+type SkillRelease = {
+  version: string;
+  status: string;
+  created_at: string;
+  published_at: string | null;
+  manifest?: Record<string, unknown>;
+  dependencies?: Array<{
+    id: string;
+    namespace: string;
+    slug: string;
+    version_requirement: string;
+    release_version: string | null;
+  }>;
+  download_stats?: DownloadStats;
+};
+
+type SkillReleaseItem = {
+  version: string;
+  status: string;
+  created_at: string;
+  published_at: string | null;
+};
+
+type SkillDetailsResponse = SkillSummary & {
+  latest_release: SkillRelease | null;
+  releases: SkillReleaseItem[];
+};
+
+type SkillReleaseResponse = SkillSummary & {
+  release: SkillRelease | null;
+  releases?: SkillReleaseItem[];
+};
+
+type NormalizedSkillDetails = {
+  skill: SkillSummary["skill"];
+  selectedRelease: SkillRelease | null;
+  releases: SkillReleaseItem[];
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function toRelease(value: unknown): SkillRelease | null {
+  if (!isObject(value) || typeof value.version !== "string") {
+    return null;
+  }
+
+  return {
+    version: value.version,
+    status: typeof value.status === "string" ? value.status : "unknown",
+    created_at: typeof value.created_at === "string" ? value.created_at : "",
+    published_at: typeof value.published_at === "string" ? value.published_at : null,
+    manifest: isObject(value.manifest) ? value.manifest : undefined,
+    dependencies: Array.isArray(value.dependencies)
+      ? (value.dependencies as SkillRelease["dependencies"])
+      : undefined,
+    download_stats: isObject(value.download_stats)
+      ? (value.download_stats as DownloadStats)
+      : undefined,
+  };
+}
+
+function toReleaseItems(value: unknown): SkillReleaseItem[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (item): item is SkillReleaseItem =>
+        isObject(item) &&
+        typeof item.version === "string" &&
+        typeof item.status === "string" &&
+        typeof item.created_at === "string",
+    )
+    .map((item) => ({
+      version: item.version,
+      status: item.status,
+      created_at: item.created_at,
+      published_at: typeof item.published_at === "string" ? item.published_at : null,
+    }));
+}
+
+function normalizeSkillDetailsResponse(payload: unknown): NormalizedSkillDetails | null {
+  if (!isObject(payload) || !isObject(payload.skill)) {
+    return null;
+  }
+
+  const skill = payload.skill as SkillSummary["skill"];
+  if (
+    typeof skill.namespace !== "string" ||
+    typeof skill.slug !== "string" ||
+    typeof skill.title !== "string"
+  ) {
+    return null;
+  }
+
+  const parsedPayload = payload as Partial<SkillDetailsResponse & SkillReleaseResponse>;
+  const selectedRelease = toRelease(parsedPayload.release) ?? toRelease(parsedPayload.latest_release);
+  const releaseItems = toReleaseItems(parsedPayload.releases);
+
+  if (releaseItems.length > 0) {
+    return { skill, selectedRelease, releases: releaseItems };
+  }
+  if (selectedRelease) {
+    return {
+      skill,
+      selectedRelease,
+      releases: [
+        {
+          version: selectedRelease.version,
+          status: selectedRelease.status,
+          created_at: selectedRelease.created_at,
+          published_at: selectedRelease.published_at,
+        },
+      ],
+    };
+  }
+
+  return { skill, selectedRelease: null, releases: [] };
+}
 
 function getCached<T>(key: string): T | null {
   try {
@@ -86,18 +188,21 @@ function formatCount(value: number): string {
 export default function SkillDetailsView({
   namespace,
   slug,
+  version,
 }: {
   namespace: string;
   slug: string;
+  version?: string;
 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<SkillDetailsResponse | null>(null);
+  const [data, setData] = useState<NormalizedSkillDetails | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
   const cacheKey = useMemo(
-    () => `${SKILL_DETAILS_CACHE_KEY_PREFIX}:${namespace}/${slug}`,
-    [namespace, slug],
+    () =>
+      `${SKILL_DETAILS_CACHE_KEY_PREFIX}:${namespace}/${slug}${version ? `@${version}` : ""}`,
+    [namespace, slug, version],
   );
 
   useEffect(() => {
@@ -106,7 +211,7 @@ export default function SkillDetailsView({
       setIsLoading(true);
       setError(null);
 
-      const cached = getCached<SkillDetailsResponse>(cacheKey);
+      const cached = getCached<NormalizedSkillDetails>(cacheKey);
       if (cached) {
         if (!isCancelled) {
           setData(cached);
@@ -116,22 +221,29 @@ export default function SkillDetailsView({
       }
 
       try {
+        const encodedNamespace = encodeURIComponent(namespace);
+        const encodedSlug = encodeURIComponent(slug);
+        const path = version
+          ? `/v1/skills/${encodedNamespace}/${encodedSlug}/releases/${encodeURIComponent(version)}`
+          : `/v1/skills/${encodedNamespace}/${encodedSlug}`;
         const response = await fetch(
-          buildApiUrl(
-            `/v1/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(slug)}`,
-          ),
+          buildApiUrl(path),
         );
         if (!response.ok) {
           throw new Error(`Failed with ${response.status}`);
         }
-        const parsed = (await response.json()) as SkillDetailsResponse;
+        const parsedRaw = (await response.json()) as unknown;
+        const parsed = normalizeSkillDetailsResponse(parsedRaw);
+        if (!parsed) {
+          throw new Error("Unexpected response shape");
+        }
         setCached(cacheKey, parsed);
         if (!isCancelled) {
           setData(parsed);
         }
       } catch {
         if (!isCancelled) {
-          setError("Failed to load skill details.");
+          setError(version ? "Failed to load this release." : "Failed to load skill details.");
         }
       } finally {
         if (!isCancelled) {
@@ -144,9 +256,10 @@ export default function SkillDetailsView({
     return () => {
       isCancelled = true;
     };
-  }, [cacheKey, namespace, slug]);
+  }, [cacheKey, namespace, slug, version]);
 
-  const installCommand = `skilldock install ${namespace}/${slug}`;
+  const selectedVersion = data?.selectedRelease?.version ?? version;
+  const installCommand = `skilldock install ${namespace}/${slug}${selectedVersion ? `@${selectedVersion}` : ""}`;
 
   const handleCopy = async () => {
     try {
@@ -182,12 +295,13 @@ export default function SkillDetailsView({
     );
   }
 
-  const manifest = data.latest_release?.manifest;
+  const manifest = data.selectedRelease?.manifest;
   const author = asString(manifest?.author);
   const homepage = asString(manifest?.homepage);
   const repository = asString(manifest?.repository);
   const docs = asString(manifest?.documentation);
-  const dependencies = data.latest_release?.dependencies ?? [];
+  const dependencies = data.selectedRelease?.dependencies ?? [];
+  const downloadStats = data.selectedRelease?.download_stats ?? data.skill.download_stats;
 
   return (
     <section className="relative overflow-hidden bg-slate-50 py-12 dark:bg-black">
@@ -201,6 +315,7 @@ export default function SkillDetailsView({
           </h1>
           <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">
             {namespace}/{slug}
+            {selectedVersion ? `@${selectedVersion}` : ""}
           </p>
           <p className="mt-3 max-w-3xl text-sm text-slate-700 dark:text-slate-300">
             {data.skill.summary}
@@ -226,13 +341,13 @@ export default function SkillDetailsView({
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Version</p>
               <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                {data.latest_release?.version ?? "N/A"}
+                {data.selectedRelease?.version ?? "N/A"}
               </p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Released</p>
               <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                {formatDate(data.latest_release?.published_at ?? data.latest_release?.created_at)}
+                {formatDate(data.selectedRelease?.published_at ?? data.selectedRelease?.created_at)}
               </p>
             </div>
             <div>
@@ -244,9 +359,9 @@ export default function SkillDetailsView({
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Downloads</p>
               <div className="mt-1 space-y-1 text-sm text-slate-900 dark:text-slate-100">
-                <p>Total: {formatCount(data.skill.download_stats.total)}</p>
-                <p>Last week: {formatCount(data.skill.download_stats.last_week)}</p>
-                <p>Last month: {formatCount(data.skill.download_stats.last_month)}</p>
+                <p>Total: {formatCount(downloadStats.total)}</p>
+                <p>Last week: {formatCount(downloadStats.last_week)}</p>
+                <p>Last month: {formatCount(downloadStats.last_month)}</p>
               </div>
             </div>
             <div>
