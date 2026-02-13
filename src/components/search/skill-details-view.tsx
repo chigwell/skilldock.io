@@ -222,7 +222,7 @@ export default function SkillDetailsView({
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-4">
-          <aside className="space-y-5 rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+          <aside className="h-fit self-start space-y-5 rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-slate-800 dark:bg-slate-950/50">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Version</p>
               <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
