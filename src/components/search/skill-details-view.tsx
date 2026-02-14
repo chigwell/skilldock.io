@@ -341,7 +341,7 @@ export default function SkillDetailsView({
   const repository = asString(manifest?.repository);
   const docs = asString(manifest?.documentation);
   const dependencies = data.selectedRelease?.dependencies ?? [];
-  const downloadStats = data.selectedRelease?.download_stats ?? data.skill.download_stats;
+  const downloadStats = data.skill.download_stats;
   const releaseOptions = data.releases;
   const hasVersionOptions = releaseOptions.length > 0;
 
@@ -410,9 +410,9 @@ export default function SkillDetailsView({
               )}
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Released</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Created</p>
               <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                {formatDate(data.selectedRelease?.published_at ?? data.selectedRelease?.created_at)}
+                {formatDate(data.skill.created_at)}
               </p>
             </div>
             <div>
