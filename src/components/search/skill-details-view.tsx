@@ -481,10 +481,12 @@ export default function SkillDetailsView({
             <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
               Skill description
             </h2>
-            <div className="mt-4 text-sm leading-relaxed text-slate-800 dark:text-slate-200 [&_a]:text-blue-700 [&_a]:underline dark:[&_a]:text-blue-300 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 dark:[&_code]:bg-slate-800 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:my-3">
-              <ReactMarkdown>
-                {descriptionMd || "No description provided."}
-              </ReactMarkdown>
+            <div className="mt-4 overflow-x-auto">
+              <div className="min-w-full text-sm leading-relaxed text-slate-800 dark:text-slate-200 [&_a]:text-blue-700 [&_a]:underline dark:[&_a]:text-blue-300 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 dark:[&_code]:bg-slate-800 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+                <ReactMarkdown>
+                  {descriptionMd || "No description provided."}
+                </ReactMarkdown>
+              </div>
             </div>
           </main>
         </div>
