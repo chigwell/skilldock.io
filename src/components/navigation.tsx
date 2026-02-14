@@ -101,18 +101,19 @@ export default function Navigation() {
         <MobileNavMenu
           isOpen={isMobileMenuOpen}
           onClose={() => setIsMobileMenuOpen(false)}
+          className="items-stretch gap-2"
         >
           {navItems.map((item) => (
             <Link
               key={item.name}
               href={item.link}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="text-neutral-700 transition-colors hover:text-neutral-950 dark:text-neutral-200 dark:hover:text-white"
+              className="block w-full rounded-lg px-3 py-3 text-neutral-700 transition-colors hover:bg-black/5 hover:text-neutral-950 dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:text-white"
             >
               <span className="block">{item.name}</span>
             </Link>
           ))}
-          <div className="mt-2 flex w-full flex-col gap-4">
+          <div className="mt-3 flex w-full flex-col gap-4">
             <Link
               href={REPO_URL}
               target="_blank"
