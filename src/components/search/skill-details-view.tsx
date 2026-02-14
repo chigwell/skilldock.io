@@ -1,12 +1,13 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { buildApiUrl } from "@/lib/api";
 
 const SKILL_DETAILS_CACHE_TTL_MS = 5 * 60 * 1000;
-const SKILL_DETAILS_CACHE_KEY_PREFIX = "skill-details-page-cache-v1";
+const SKILL_DETAILS_CACHE_KEY_PREFIX = "skill-details-page-cache-v2";
 
 type DownloadStats = {
   total: number;
@@ -33,6 +34,7 @@ type SkillRelease = {
   status: string;
   created_at: string;
   published_at: string | null;
+  description_md: string;
   manifest?: Record<string, unknown>;
   dependencies?: Array<{
     id: string;
@@ -81,6 +83,7 @@ function toRelease(value: unknown): SkillRelease | null {
     status: typeof value.status === "string" ? value.status : "unknown",
     created_at: typeof value.created_at === "string" ? value.created_at : "",
     published_at: typeof value.published_at === "string" ? value.published_at : null,
+    description_md: typeof value.description_md === "string" ? value.description_md : "",
     manifest: isObject(value.manifest) ? value.manifest : undefined,
     dependencies: Array.isArray(value.dependencies)
       ? (value.dependencies as SkillRelease["dependencies"])
@@ -199,6 +202,7 @@ export default function SkillDetailsView({
   slug: string;
   version?: string;
 }) {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<NormalizedSkillDetails | null>(null);
@@ -293,6 +297,9 @@ export default function SkillDetailsView({
 
   const selectedVersion = data?.selectedRelease?.version ?? version;
   const installCommand = `skilldock install ${namespace}/${slug}${selectedVersion ? `@${selectedVersion}` : ""}`;
+  const selectedDescription = data?.selectedRelease?.description_md.trim() ?? "";
+  const fallbackDescription = data?.skill.description_md.trim() ?? "";
+  const descriptionMd = selectedDescription || fallbackDescription;
 
   const handleCopy = async () => {
     try {
@@ -335,6 +342,8 @@ export default function SkillDetailsView({
   const docs = asString(manifest?.documentation);
   const dependencies = data.selectedRelease?.dependencies ?? [];
   const downloadStats = data.selectedRelease?.download_stats ?? data.skill.download_stats;
+  const releaseOptions = data.releases;
+  const hasVersionOptions = releaseOptions.length > 0;
 
   return (
     <section className="relative overflow-hidden bg-slate-50 py-12 dark:bg-black">
@@ -373,9 +382,32 @@ export default function SkillDetailsView({
           <aside className="h-fit self-start space-y-5 rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-slate-800 dark:bg-slate-950/50">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Version</p>
-              <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                {data.selectedRelease?.version ?? "N/A"}
-              </p>
+              {hasVersionOptions ? (
+                <select
+                  aria-label="Select release version"
+                  value={selectedVersion ?? "__latest__"}
+                  onChange={(event) => {
+                    const nextVersion = event.target.value;
+                    const nextSlug =
+                      nextVersion === "__latest__" ? slug : `${slug}@${nextVersion}`;
+                    router.push(
+                      `/skill/${encodeURIComponent(namespace)}/${encodeURIComponent(nextSlug)}`,
+                    );
+                  }}
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  <option value="__latest__">latest</option>
+                  {releaseOptions.map((release) => (
+                    <option key={release.version} value={release.version}>
+                      {release.version}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
+                  {data.selectedRelease?.version ?? "N/A"}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Released</p>
@@ -451,7 +483,7 @@ export default function SkillDetailsView({
             </h2>
             <div className="mt-4 text-sm leading-relaxed text-slate-800 dark:text-slate-200 [&_a]:text-blue-700 [&_a]:underline dark:[&_a]:text-blue-300 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 dark:[&_code]:bg-slate-800 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:my-3">
               <ReactMarkdown>
-                {data.skill.description_md || "No description provided."}
+                {descriptionMd || "No description provided."}
               </ReactMarkdown>
             </div>
           </main>
