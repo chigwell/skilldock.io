@@ -207,6 +207,7 @@ export default function SkillDetailsView({
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<NormalizedSkillDetails | null>(null);
   const [isCopied, setIsCopied] = useState(false);
+  const [isPromptCopied, setIsPromptCopied] = useState(false);
 
   const cacheKey = useMemo(
     () =>
@@ -305,6 +306,7 @@ export default function SkillDetailsView({
   const selectedDescription = data?.selectedRelease?.description_md.trim() ?? "";
   const fallbackDescription = data?.skill.description_md.trim() ?? "";
   const descriptionMd = selectedDescription || fallbackDescription;
+  const plainDescription = descriptionMd || "No description provided.";
 
   const handleCopy = async () => {
     try {
@@ -313,6 +315,16 @@ export default function SkillDetailsView({
       window.setTimeout(() => setIsCopied(false), 1500);
     } catch {
       setIsCopied(false);
+    }
+  };
+
+  const handleCopyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(plainDescription);
+      setIsPromptCopied(true);
+      window.setTimeout(() => setIsPromptCopied(false), 1500);
+    } catch {
+      setIsPromptCopied(false);
     }
   };
 
@@ -369,17 +381,28 @@ export default function SkillDetailsView({
             {data.skill.summary}
           </p>
 
-          <div className="mt-5 inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
-            <code className="overflow-x-auto text-sm text-slate-800 dark:text-slate-200">
-              {installCommand}
-            </code>
+          <div className="mt-5 flex max-w-full items-stretch gap-3">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+              <code className="overflow-x-auto text-sm text-slate-800 dark:text-slate-200">
+                {installCommand}
+              </code>
+              <button
+                type="button"
+                onClick={() => void handleCopy()}
+                className="inline-flex items-center rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                aria-label="Copy install command"
+              >
+                {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => void handleCopy()}
-              className="inline-flex items-center rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-              aria-label="Copy install command"
+              onClick={() => void handleCopyPrompt()}
+              style={{ height: "50px" }}
+              className="inline-flex h-full items-center rounded-lg border border-slate-300 bg-white p-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              aria-label="Copy LLM instructions"
             >
-              {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {isPromptCopied ? "Copied" : "Copy LLM Instructions"}
             </button>
           </div>
         </div>
@@ -471,7 +494,7 @@ export default function SkillDetailsView({
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-full text-sm leading-relaxed text-slate-800 dark:text-slate-200 [&_a]:text-blue-700 [&_a]:underline dark:[&_a]:text-blue-300 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 dark:[&_code]:bg-slate-800 [&_h1]:mt-4 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
                 <ReactMarkdown>
-                  {descriptionMd || "No description provided."}
+                  {plainDescription}
                 </ReactMarkdown>
               </div>
             </div>
