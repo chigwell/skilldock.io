@@ -133,11 +133,7 @@ function mapApiStatsToDisplayStats(stats: StatsResponse): DisplayStat[] {
     {
       label: "Downloads",
       ...formatStatValue(stats.total_downloads, { forcePlus: true }),
-    },
-    {
-      label: "Users",
-      ...formatStatValue(stats.total_users, { forcePlus: true }),
-    },
+    }
   ];
 }
 
@@ -353,7 +349,7 @@ export default function CircuitFlow() {
 
             <h1 className="px-2 text-4xl font-black leading-[0.9] tracking-tight sm:text-5xl md:text-7xl lg:text-8xl">
               <span className="bg-gradient-to-r from-[#0f274b] via-[#153a6e] to-[#1f4f94] bg-clip-text text-transparent dark:from-white dark:via-blue-100 dark:to-blue-300">
-                Build faster
+                Empower Your Agent
               </span>
               <br />
               <span className="bg-gradient-to-r from-[#1e90ff] via-[#67b8ff] to-[#9bd5ff] bg-clip-text text-transparent">
@@ -362,7 +358,7 @@ export default function CircuitFlow() {
             </h1>
 
             <p className="mx-auto max-w-3xl px-4 text-base leading-relaxed text-slate-700 sm:text-lg md:text-xl dark:text-slate-200/85">
-              Find, install and publish the right AI Skills with the SkillDock.io
+              Find, install and publish the right AI Skills
             </p>
           </div>
 
