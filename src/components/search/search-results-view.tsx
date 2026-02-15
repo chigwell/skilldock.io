@@ -8,7 +8,7 @@ import Skeleton from "@/components/ui/skeleton";
 import { buildApiUrl } from "@/lib/api";
 
 const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
-const SEARCH_CACHE_KEY_PREFIX = "skills-search-cache-v1";
+const SEARCH_CACHE_KEY_PREFIX = "skills-search-cache-v2";
 
 interface SkillResult {
   namespace: string;
@@ -121,12 +121,24 @@ export default function SearchResultsView() {
       }
 
       try {
-        const params = new URLSearchParams();
-        if (query.trim()) params.set("q", query.trim());
-        params.set("page", String(normalizedPage));
-        params.set("per_page", String(perPage));
-
-        const response = await fetch(buildApiUrl(`/v1/skills?${params.toString()}`));
+        const trimmedQuery = query.trim();
+        const response = trimmedQuery
+          ? await fetch(buildApiUrl("/v2/search"), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                query: trimmedQuery,
+                rewrite_query: true,
+                page: normalizedPage,
+                per_page: perPage,
+                max_num_results: perPage,
+              }),
+            })
+          : await fetch(
+              buildApiUrl(`/v1/skills?page=${normalizedPage}&per_page=${perPage}`),
+            );
         if (!response.ok) {
           throw new Error(`Search request failed with ${response.status}`);
         }
