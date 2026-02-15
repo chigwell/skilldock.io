@@ -302,11 +302,25 @@ export default function SkillDetailsView({
   }, [cacheKey, namespace, slug, version]);
 
   const selectedVersion = data?.selectedRelease?.version ?? version;
-  const installCommand = `skilldock install ${namespace}/${slug}${selectedVersion ? `@${selectedVersion}` : ""}`;
+  const skillIdentifier = `${namespace}/${slug}${selectedVersion ? `@${selectedVersion}` : ""}`;
+  const installCommand = `skilldock install ${skillIdentifier}`;
   const selectedDescription = data?.selectedRelease?.description_md.trim() ?? "";
   const fallbackDescription = data?.skill.description_md.trim() ?? "";
   const descriptionMd = selectedDescription || fallbackDescription;
   const plainDescription = descriptionMd || "No description provided.";
+  const llmInstructions = `To use this skill you need to install skilldock (if not already before):
+Install the CLI
+Preferred (pipx):
+pipx install --force skilldock
+skilldock --version
+Fallback (pip, user mode):
+python3 -m pip install --user --upgrade skilldock
+skilldock --version
+
+Install this skill:
+skilldock install ${skillIdentifier}
+
+${plainDescription}`;
 
   const handleCopy = async () => {
     try {
@@ -320,7 +334,7 @@ export default function SkillDetailsView({
 
   const handleCopyPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(plainDescription);
+      await navigator.clipboard.writeText(llmInstructions);
       setIsPromptCopied(true);
       window.setTimeout(() => setIsPromptCopied(false), 1500);
     } catch {
