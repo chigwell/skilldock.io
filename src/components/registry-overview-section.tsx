@@ -16,8 +16,16 @@ export default function RegistryOverviewSection() {
 
         <div className="space-y-5 text-left text-slate-800 dark:text-slate-100 md:col-span-2">
           <p className="text-base leading-relaxed sm:text-lg">
-            SkillDock.io is a registry of reusable AI skills built around the <a href="https://agentskills.io/what-are-skills" target="_blank" className="text-blue-600 hover:underline dark:text-blue-400">AgentSkills</a> specification, so skills can work across different
-            agent runtimes.
+            SkillDock.io is a registry of reusable AI skills built around the{" "}
+            <a
+              href="https://agentskills.io/what-are-skills"
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              AgentSkills
+            </a>{" "}
+            specification, so skills can work across different agent runtimes.
           </p>
 
           <p className="text-base leading-relaxed sm:text-lg">
