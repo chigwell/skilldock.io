@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { buildApiUrl } from "@/lib/api";
@@ -21,6 +21,7 @@ type SkillSummary = {
     slug: string;
     title: string;
     summary: string;
+    homepage_url?: string | null;
     description_md: string;
     tags: string[];
     created_at: string;
@@ -202,7 +203,6 @@ export default function SkillDetailsView({
   slug: string;
   version?: string;
 }) {
-  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<NormalizedSkillDetails | null>(null);
@@ -278,9 +278,14 @@ export default function SkillDetailsView({
         if (!isCancelled) {
           setData(parsed);
         }
-      } catch {
+      } catch (err) {
+        const reason = err instanceof Error && err.message ? ` (${err.message})` : "";
         if (!isCancelled) {
-          setError(version ? "Failed to load this release." : "Failed to load skill details.");
+          setError(
+            version
+              ? `Failed to load this release${reason}.`
+              : `Failed to load skill details${reason}.`,
+          );
         }
       } finally {
         if (!isCancelled) {
@@ -337,13 +342,14 @@ export default function SkillDetailsView({
 
   const manifest = data.selectedRelease?.manifest;
   const author = asString(manifest?.author);
-  const homepage = asString(manifest?.homepage);
+  const homepageFromSkill = asString(data.skill.homepage_url);
+  const homepageFromManifest = asString(manifest?.homepage);
+  const homepage = homepageFromSkill ?? homepageFromManifest;
   const repository = asString(manifest?.repository);
   const docs = asString(manifest?.documentation);
   const dependencies = data.selectedRelease?.dependencies ?? [];
   const downloadStats = data.skill.download_stats;
-  const releaseOptions = data.releases;
-  const hasVersionOptions = releaseOptions.length > 0;
+  const currentReleaseLabel = selectedVersion ? `@${selectedVersion}` : "latest";
 
   return (
     <section className="relative overflow-hidden bg-slate-50 py-12 dark:bg-black">
@@ -381,33 +387,14 @@ export default function SkillDetailsView({
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-4">
           <aside className="h-fit self-start space-y-5 rounded-xl border border-slate-200/80 bg-white/85 p-4 dark:border-slate-800 dark:bg-slate-950/50">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Version</p>
-              {hasVersionOptions ? (
-                <select
-                  aria-label="Select release version"
-                  value={selectedVersion ?? "__latest__"}
-                  onChange={(event) => {
-                    const nextVersion = event.target.value;
-                    const nextSlug =
-                      nextVersion === "__latest__" ? slug : `${slug}@${nextVersion}`;
-                    router.push(
-                      `/skill/${encodeURIComponent(namespace)}/${encodeURIComponent(nextSlug)}`,
-                    );
-                  }}
-                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                >
-                  <option value="__latest__">latest</option>
-                  {releaseOptions.map((release) => (
-                    <option key={release.version} value={release.version}>
-                      {release.version}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                  {data.selectedRelease?.version ?? "N/A"}
-                </p>
-              )}
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Current release</p>
+              <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">{currentReleaseLabel}</p>
+              <Link
+                href={`/skill/${encodeURIComponent(namespace)}/${encodeURIComponent(slug)}/releases`}
+                className="mt-2 inline-block text-xs text-blue-700 hover:underline dark:text-blue-300"
+              >
+                View release history
+              </Link>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Created</p>
@@ -467,9 +454,9 @@ export default function SkillDetailsView({
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Links</p>
               <div className="mt-1 space-y-1 text-sm">
-                {homepage && <a href={homepage} target="_blank" className="text-blue-700 hover:underline dark:text-blue-300">Homepage</a>}
-                {repository && <a href={repository} target="_blank" className="text-blue-700 hover:underline dark:text-blue-300">Repository</a>}
-                {docs && <a href={docs} target="_blank" className="text-blue-700 hover:underline dark:text-blue-300">Documentation</a>}
+                {homepage && <a href={homepage} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline dark:text-blue-300">Homepage</a>}
+                {repository && <a href={repository} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline dark:text-blue-300">Repository</a>}
+                {docs && <a href={docs} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline dark:text-blue-300">Documentation</a>}
                 {!homepage && !repository && !docs && (
                   <span className="text-slate-900 dark:text-slate-100">No links</span>
                 )}

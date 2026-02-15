@@ -17,6 +17,12 @@ interface SkillResult {
   summary: string;
   tags: string[];
   updated_at: string;
+  latest_releases?: Array<{
+    version: string;
+    status?: string;
+    created_at?: string;
+    published_at?: string | null;
+  }>;
 }
 
 interface SkillsSearchResponse {
@@ -249,6 +255,18 @@ export default function SearchResultsView() {
                     </span>
                   ))}
                 </div>
+                {Array.isArray(result.latest_releases) && result.latest_releases.length > 0 && (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {result.latest_releases.slice(0, 5).map((release) => (
+                      <span
+                        key={`${result.namespace}/${result.slug}-release-${release.version}`}
+                        className="rounded-full border border-slate-300/80 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-600/80 dark:bg-slate-800 dark:text-slate-200"
+                      >
+                        v{release.version}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                   <span>{result.namespace}/{result.slug}</span>
                   <span>Updated {formatDate(result.updated_at)}</span>
