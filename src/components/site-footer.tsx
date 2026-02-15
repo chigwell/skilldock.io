@@ -3,7 +3,7 @@ import Link from "next/link";
 const navItems = [
   { label: "Skills", href: "/search" },
   { label: "Docs", href: "https://docs.skilldock.io/" },
-  { label: "Themes", href: "/themes" },
+  { label: "Trending", href: "/trending" },
 ];
 
 export default function SiteFooter() {

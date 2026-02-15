@@ -50,7 +50,7 @@ export default function Navigation() {
   const navItems = [
     { name: "Skills", link: "/search" },
     { name: "Docs", link: "https://docs.skilldock.io/" },
-    { name: "Theme(Beta)", link: "/themes" },
+    { name: "Trending", link: "/trending" },
   ];
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
