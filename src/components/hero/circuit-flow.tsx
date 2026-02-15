@@ -46,6 +46,7 @@ const nodeCoordinates = [
   [800, 680],
   [1000, 750],
 ] as const;
+const highlightedNodeIndex = 16; // Last node of the second line from bottom (1100, 550)
 
 const verticalLines = [
   { x1: 300, y1: 150, x2: 300, y2: 400 },
@@ -321,14 +322,14 @@ export default function CircuitFlow() {
           />
         ))}
 
-        {nodeCoordinates.map(([cx, cy]) => (
+        {nodeCoordinates.map(([cx, cy], index) => (
           <circle
             key={`node-${cx}-${cy}`}
             className="circuit-node"
             cx={cx}
             cy={cy}
             r="4"
-            fill={colors.primary}
+            fill={index === highlightedNodeIndex ? "#fe5300" : colors.primary}
             filter="url(#glow)"
           />
         ))}
@@ -357,9 +358,15 @@ export default function CircuitFlow() {
               </span>
             </h1>
 
-            <p className="mx-auto max-w-3xl px-4 text-base leading-relaxed text-slate-700 sm:text-lg md:text-xl dark:text-slate-200/85">
-              Find, install and publish the right AI Skills
-            </p>
+            <div className="space-y-0.5">
+              <p className="mx-auto max-w-3xl px-4 text-base leading-relaxed text-slate-700 sm:text-lg md:text-xl dark:text-slate-200/85">
+                Find, install and publish the right AI{" "}
+                <span className="text-[#fe7a04]">Skills</span>
+              </p>
+              <p className="mx-auto max-w-3xl px-4 text-base leading-relaxed text-slate-700 sm:text-lg md:text-xl dark:text-slate-200/85">
+                with automatic updates to the latest versions and dependencies.
+              </p>
+            </div>
           </div>
 
 
