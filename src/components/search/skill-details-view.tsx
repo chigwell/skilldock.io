@@ -8,11 +8,18 @@ import { buildApiUrl } from "@/lib/api";
 
 const SKILL_DETAILS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SKILL_DETAILS_CACHE_KEY_PREFIX = "skill-details-page-cache-v2";
+const AVATAR_FALLBACK_URL = "https://skilldock.io/logo.png";
 
 type DownloadStats = {
   total: number;
   last_week: number;
   last_month: number;
+};
+
+type SkillAuthor = {
+  user_id?: number;
+  display_name?: string | null;
+  google_picture?: string | null;
 };
 
 type SkillSummary = {
@@ -27,6 +34,7 @@ type SkillSummary = {
     created_at: string;
     updated_at: string;
     download_stats: DownloadStats;
+    author?: SkillAuthor | null;
   };
 };
 
@@ -194,6 +202,11 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
+function toWsrvImageUrl(url: string): string {
+  const trimmed = url.trim();
+  return `https://wsrv.nl/?url=${encodeURIComponent(trimmed)}`;
+}
+
 export default function SkillDetailsView({
   namespace,
   slug,
@@ -208,6 +221,9 @@ export default function SkillDetailsView({
   const [data, setData] = useState<NormalizedSkillDetails | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [isPromptCopied, setIsPromptCopied] = useState(false);
+  const [resolvedAvatarUrl, setResolvedAvatarUrl] = useState<string>(
+    toWsrvImageUrl(AVATAR_FALLBACK_URL),
+  );
 
   const cacheKey = useMemo(
     () =>
@@ -342,6 +358,29 @@ ${plainDescription}`;
     }
   };
 
+  const authorAvatarCandidate = data?.skill.author?.google_picture
+    ? toWsrvImageUrl(data.skill.author.google_picture)
+    : toWsrvImageUrl(AVATAR_FALLBACK_URL);
+
+  useEffect(() => {
+    let active = true;
+    const fallbackUrl = toWsrvImageUrl(AVATAR_FALLBACK_URL);
+    const candidateUrl = authorAvatarCandidate;
+
+    const probe = new window.Image();
+    probe.onload = () => {
+      if (active) setResolvedAvatarUrl(candidateUrl);
+    };
+    probe.onerror = () => {
+      if (active) setResolvedAvatarUrl(fallbackUrl);
+    };
+    probe.src = candidateUrl;
+
+    return () => {
+      active = false;
+    };
+  }, [authorAvatarCandidate]);
+
   if (isLoading) {
     return (
       <section className="relative overflow-hidden bg-slate-50 py-12 dark:bg-black">
@@ -367,7 +406,9 @@ ${plainDescription}`;
   }
 
   const manifest = data.selectedRelease?.manifest;
-  const author = asString(manifest?.author);
+  const authorFromManifest = asString(manifest?.author);
+  const authorDisplayName =
+    asString(data.skill.author?.display_name) ?? authorFromManifest ?? data.skill.namespace;
   const homepageFromSkill = asString(data.skill.homepage_url);
   const homepageFromManifest = asString(manifest?.homepage);
   const homepage = homepageFromSkill ?? homepageFromManifest;
@@ -455,7 +496,19 @@ ${plainDescription}`;
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Author</p>
-              <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">{author ?? data.skill.namespace}</p>
+              <div className="mt-1 flex items-center gap-2">
+                <span
+                  role="img"
+                  aria-label={`${authorDisplayName} avatar`}
+                  className="h-6 w-6 rounded-full border border-slate-200 dark:border-slate-700"
+                  style={{
+                    backgroundImage: `url("${resolvedAvatarUrl}")`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                  }}
+                />
+                <p className="text-sm text-slate-900 dark:text-slate-100">{authorDisplayName}</p>
+              </div>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Dependencies</p>
