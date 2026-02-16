@@ -4,6 +4,7 @@ import { Search } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { buildApiUrl } from "@/lib/api";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const STATS_CACHE_KEY = "landing-stats-cache-v1";
 const STATS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -47,6 +48,7 @@ const nodeCoordinates = [
   [1000, 750],
 ] as const;
 const highlightedNodeIndex = 16; // Last node of the second line from bottom (1100, 550)
+const highlightedNode = nodeCoordinates[highlightedNodeIndex];
 
 const verticalLines = [
   { x1: 300, y1: 150, x2: 300, y2: 400 },
@@ -141,6 +143,7 @@ function mapApiStatsToDisplayStats(stats: StatsResponse): DisplayStat[] {
 export default function CircuitFlow() {
   const svgRef = useRef<SVGSVGElement>(null);
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [searchQuery, setSearchQuery] = useState("");
   const [apiStats, setApiStats] = useState<StatsResponse>({
     total_downloads: 0,
@@ -191,6 +194,7 @@ export default function CircuitFlow() {
 
   useEffect(() => {
     if (!svgRef.current) return;
+    if (isMobile) return;
 
     const svg = svgRef.current;
     const lines = svg.querySelectorAll<SVGGeometryElement>(".circuit-line");
@@ -240,7 +244,17 @@ export default function CircuitFlow() {
         for (const animation of circle.getAnimations()) animation.cancel();
       }
     };
-  }, []);
+  }, [isMobile]);
+
+  const visibleNodeCoordinates = useMemo(
+    () => (isMobile ? nodeCoordinates.filter((_, index) => index % 2 === 0) : nodeCoordinates),
+    [isMobile],
+  );
+
+  const visibleVerticalLines = useMemo(
+    () => (isMobile ? verticalLines.slice(0, 1) : verticalLines),
+    [isMobile],
+  );
 
   const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -257,7 +271,7 @@ export default function CircuitFlow() {
 
       <svg
         ref={svgRef}
-        className="absolute inset-0 h-full w-full opacity-40 dark:opacity-55"
+        className="absolute inset-0 h-full w-full opacity-30 dark:opacity-45 md:opacity-40 md:dark:opacity-55"
         viewBox="0 0 1200 800"
         preserveAspectRatio="xMidYMid slice"
       >
@@ -283,7 +297,7 @@ export default function CircuitFlow() {
           fill="none"
           stroke="url(#lineGradient)"
           strokeWidth="2"
-          filter="url(#glow)"
+          filter={isMobile ? undefined : "url(#glow)"}
         />
         <path
           className="circuit-line"
@@ -291,7 +305,7 @@ export default function CircuitFlow() {
           fill="none"
           stroke="url(#lineGradient)"
           strokeWidth="2"
-          filter="url(#glow)"
+          filter={isMobile ? undefined : "url(#glow)"}
         />
         <path
           className="circuit-line"
@@ -299,7 +313,7 @@ export default function CircuitFlow() {
           fill="none"
           stroke="url(#lineGradient)"
           strokeWidth="2"
-          filter="url(#glow)"
+          filter={isMobile ? undefined : "url(#glow)"}
         />
         <path
           className="circuit-line"
@@ -307,10 +321,10 @@ export default function CircuitFlow() {
           fill="none"
           stroke="url(#lineGradient)"
           strokeWidth="2"
-          filter="url(#glow)"
+          filter={isMobile ? undefined : "url(#glow)"}
         />
 
-        {verticalLines.map((line) => (
+        {visibleVerticalLines.map((line) => (
           <line
             key={`line-${line.x1}-${line.y1}-${line.x2}-${line.y2}`}
             className="circuit-line"
@@ -318,19 +332,23 @@ export default function CircuitFlow() {
             stroke={colors.primary}
             strokeWidth="1.5"
             opacity="0.6"
-            filter="url(#glow)"
+            filter={isMobile ? undefined : "url(#glow)"}
           />
         ))}
 
-        {nodeCoordinates.map(([cx, cy], index) => (
+        {visibleNodeCoordinates.map(([cx, cy]) => (
           <circle
             key={`node-${cx}-${cy}`}
             className="circuit-node"
             cx={cx}
             cy={cy}
             r="4"
-            fill={index === highlightedNodeIndex ? "#fe5300" : colors.primary}
-            filter="url(#glow)"
+            fill={
+              cx === highlightedNode[0] && cy === highlightedNode[1]
+                ? "#fe5300"
+                : colors.primary
+            }
+            filter={isMobile ? undefined : "url(#glow)"}
           />
         ))}
       </svg>
