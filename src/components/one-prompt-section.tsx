@@ -5,6 +5,32 @@ import { Check, Copy } from "lucide-react";
 
 import { MovingBorderButton } from "@/components/ui/moving-border-button";
 
+function extractPromptMarkdown(raw: string): string {
+  const trimmed = raw.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const looksLikeHtml =
+    trimmed.startsWith("<!DOCTYPE html") ||
+    trimmed.startsWith("<html") ||
+    trimmed.includes("<body");
+
+  if (!looksLikeHtml) {
+    return trimmed;
+  }
+
+  const doc = new DOMParser().parseFromString(raw, "text/html");
+  const preText = doc.querySelector("pre")?.textContent?.trim();
+
+  if (preText) {
+    return preText;
+  }
+
+  return doc.body?.textContent?.trim() ?? "";
+}
+
 export default function OnePromptSection() {
   const [isCopying, setIsCopying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -25,7 +51,7 @@ export default function OnePromptSection() {
         throw new Error("Unable to load prompt text.");
       }
 
-      const prompt = await response.text();
+      const prompt = extractPromptMarkdown(await response.text());
 
       if (!prompt.trim()) {
         throw new Error("Prompt text is empty.");
