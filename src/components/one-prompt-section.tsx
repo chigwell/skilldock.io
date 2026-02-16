@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 
-import { RainbowButton } from "@/components/ui/rainbow-button";
+import { MovingBorderButton } from "@/components/ui/moving-border-button";
 
 export default function OnePromptSection() {
   const [isCopying, setIsCopying] = useState(false);
@@ -69,17 +69,18 @@ export default function OnePromptSection() {
             and start using SkillDock skills right away.
           </p>
           <div className="mt-6 flex justify-center">
-            <RainbowButton
+            <MovingBorderButton
               type="button"
               onClick={handleCopyPrompt}
               disabled={isCopying}
+              containerClassName="min-w-[18rem]"
             >
               {isCopying
                 ? "Copying prompt..."
                 : copied
                   ? "Prompt copied. Paste it into your agent."
                   : "Copy integration prompt"}
-            </RainbowButton>
+            </MovingBorderButton>
           </div>
           {copyError ? (
             <p className="mt-3 text-center text-sm text-red-600 dark:text-red-400">
