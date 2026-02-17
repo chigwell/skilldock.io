@@ -26,11 +26,41 @@ interface SkillItem {
   slug?: unknown;
   updated_at?: unknown;
   updatedAt?: unknown;
+  latest_release?: {
+    version?: unknown;
+  };
+  latestRelease?: {
+    version?: unknown;
+  };
+  latest_releases?: Array<{
+    version?: unknown;
+  }>;
+  latestReleases?: Array<{
+    version?: unknown;
+  }>;
+  releases?: Array<{
+    version?: unknown;
+  }>;
   skill?: {
     namespace?: unknown;
     slug?: unknown;
     updated_at?: unknown;
     updatedAt?: unknown;
+    latest_release?: {
+      version?: unknown;
+    };
+    latestRelease?: {
+      version?: unknown;
+    };
+    latest_releases?: Array<{
+      version?: unknown;
+    }>;
+    latestReleases?: Array<{
+      version?: unknown;
+    }>;
+    releases?: Array<{
+      version?: unknown;
+    }>;
   };
 }
 
@@ -74,6 +104,12 @@ function escapeXml(value: string): string {
 function isValidIsoDate(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim()) return false;
   return !Number.isNaN(Date.parse(value));
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 export function sitemapXmlResponse(xmlBody: string): Response {
@@ -155,7 +191,19 @@ export async function getSkillsSitemapEntries(page: number): Promise<
       }
 
       const encodedNamespace = encodeURIComponent(namespace);
-      const encodedSlug = encodeURIComponent(slug);
+      const latestVersion =
+        asNonEmptyString(skill.latest_release?.version) ??
+        asNonEmptyString(skill.latestRelease?.version) ??
+        asNonEmptyString(skill.latest_releases?.[0]?.version) ??
+        asNonEmptyString(skill.latestReleases?.[0]?.version) ??
+        asNonEmptyString(skill.releases?.[0]?.version) ??
+        asNonEmptyString(skill.skill?.latest_release?.version) ??
+        asNonEmptyString(skill.skill?.latestRelease?.version) ??
+        asNonEmptyString(skill.skill?.latest_releases?.[0]?.version) ??
+        asNonEmptyString(skill.skill?.latestReleases?.[0]?.version) ??
+        asNonEmptyString(skill.skill?.releases?.[0]?.version);
+      const slugWithVersion = latestVersion ? `${slug}@${latestVersion}` : slug;
+      const encodedSlug = encodeURIComponent(slugWithVersion);
       const url = `${siteUrl}/skill/${encodedNamespace}/${encodedSlug}`;
       const updatedAtRaw =
         skill.updated_at ?? skill.updatedAt ?? skill.skill?.updated_at ?? skill.skill?.updatedAt;
