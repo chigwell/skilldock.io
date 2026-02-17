@@ -2,6 +2,7 @@
 
 import { Search } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { buildApiUrl } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -21,6 +22,7 @@ type DisplayStat = {
   value: number;
   suffix?: string;
   decimals?: number;
+  href?: string;
 };
 
 const nodeCoordinates = [
@@ -127,6 +129,7 @@ function mapApiStatsToDisplayStats(stats: StatsResponse): DisplayStat[] {
   return [
     {
       label: "Skills",
+      href: "/search",
       ...formatStatValue(stats.total_skills, { forcePlus: true }),
     },
     {
@@ -415,18 +418,36 @@ export default function CircuitFlow() {
           <div className="flex items-center justify-center gap-8 px-4 text-center md:gap-14">
             {stats.map((stat, idx) => (
               <div key={stat.label} className="flex items-center">
-                <div>
-                  <div className="mb-1 bg-gradient-to-r from-blue-200 via-blue-300 to-blue-500 bg-clip-text text-2xl font-bold text-transparent sm:text-3xl">
-                    <CountUpStat
-                      value={stat.value}
-                      suffix={stat.suffix}
-                      decimals={stat.decimals}
-                    />
+                {stat.href ? (
+                  <Link
+                    href={stat.href}
+                    className="group rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+                  >
+                    <div className="mb-1 bg-gradient-to-r from-blue-200 via-blue-300 to-blue-500 bg-clip-text text-2xl font-bold text-transparent transition-opacity group-hover:opacity-80 sm:text-3xl">
+                      <CountUpStat
+                        value={stat.value}
+                        suffix={stat.suffix}
+                        decimals={stat.decimals}
+                      />
+                    </div>
+                    <div className="text-xs text-slate-600 transition-colors group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300 md:text-sm">
+                      {stat.label}
+                    </div>
+                  </Link>
+                ) : (
+                  <div>
+                    <div className="mb-1 bg-gradient-to-r from-blue-200 via-blue-300 to-blue-500 bg-clip-text text-2xl font-bold text-transparent sm:text-3xl">
+                      <CountUpStat
+                        value={stat.value}
+                        suffix={stat.suffix}
+                        decimals={stat.decimals}
+                      />
+                    </div>
+                    <div className="text-xs text-slate-600 dark:text-slate-300 md:text-sm">
+                      {stat.label}
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-600 dark:text-slate-300 md:text-sm">
-                    {stat.label}
-                  </div>
-                </div>
+                )}
                 {idx !== stats.length - 1 && (
                   <div className="ml-8 h-8 w-px bg-gradient-to-b from-transparent via-blue-400/40 to-transparent md:ml-14 md:h-12" />
                 )}
