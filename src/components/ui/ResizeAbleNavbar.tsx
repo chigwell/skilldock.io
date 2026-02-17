@@ -322,7 +322,7 @@ export const NavbarLogo = () => {
             height={40}
             priority
             quality={100}
-            src="/logo.png"
+            src="https://wsrv.nl/?url=https://skilldock.io/logo.png&w=150&h=150"
             width={40}
           />
         </div>
