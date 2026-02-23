@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skilldock"
+version = "2026.02.221542"
+description = "OpenAPI-driven Python SDK and CLI for the SkillDock.io API."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "SkillDock" }]
+keywords = ["skilldock", "openapi", "api", "client", "sdk"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = [
+  "httpx>=0.27.0",
+  "platformdirs>=4.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.5.0",
+  "mypy>=1.10.0",
+]
+
+[project.scripts]
+skilldock = "skilldock.cli:main"
+
+[project.urls]
+Homepage = "https://skilldock.io"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skilldock"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/skilldock",
+  "README.md",
+  "LICENSE",
+  "pyproject.toml",
+]
+exclude = [
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/*.pyo",
+  "**/*.pyd",
+]
