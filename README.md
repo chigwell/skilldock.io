@@ -1,3 +1,9 @@
+<div align="center">
+  <a target="_blank" href="https://skilldock.io/?utm_source=github&utm_medium=readme">
+   <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&height=200&section=header&text=SkillDock.io&fontSize=50&fontAlignY=35&animation=fadeIn&fontColor=FFFFFF&descAlignY=55&descAlign=62" alt="SkillDock" width="100%" />
+  </a>
+</div>
+
 [![PyPI version](https://badge.fury.io/py/skilldock.svg)](https://badge.fury.io/py/skilldock)
 [![License: MIT](https://img.shields.io/badge/License-Apache2.0-green.svg)](https://opensource.org/license/apache-2-0)
 [![Downloads](https://static.pepy.tech/badge/skilldock)](https://pepy.tech/project/skilldock)
