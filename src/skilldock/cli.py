@@ -314,6 +314,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    help_cmd = sub.add_parser(
+        "help",
+        aliases=["h"],
+        help="Show a friendly overview of what the CLI can do",
+    )
+    help_cmd.add_argument(
+        "topic",
+        nargs="?",
+        help="Optional top-level command name (prints built-in argparse help for that command)",
+    )
+
     # config
     cfg = sub.add_parser("config", help="Manage local config")
     cfg_sub = cfg.add_subparsers(dest="subcmd", required=True)
@@ -1009,8 +1020,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
             }
             if args.per_page:
                 body["max_num_results"] = args.per_page
-
-            resp = client.request(method="POST", path="/v2/search", json_body=body, auth=True)
+            resp = client.request(method="POST", path="/v2/search", json_body=body, auth=True, auth_optional=True)
             data = _unwrap_success_envelope(resp.json())
         finally:
             client.close()
@@ -1096,7 +1106,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
         skill_path = f"/v1/skills/{quote(ref.namespace, safe='')}/{quote(ref.slug, safe='')}"
         client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
         try:
-            resp = client.request(method="GET", path=skill_path, auth=True)
+            resp = client.request(method="GET", path=skill_path, auth=True, auth_optional=True)
             data = _unwrap_success_envelope(resp.json())
         finally:
             client.close()
@@ -1196,7 +1206,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
         release_path = f"{skill_path}/releases/{quote(args.version, safe='')}"
         client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
         try:
-            rel_resp = client.request(method="GET", path=release_path, auth=True)
+            rel_resp = client.request(method="GET", path=release_path, auth=True, auth_optional=True)
             rel_data = _unwrap_success_envelope(rel_resp.json())
             release = rel_data.get("release") if isinstance(rel_data, dict) and isinstance(rel_data.get("release"), dict) else rel_data
             skill = rel_data.get("skill") if isinstance(rel_data, dict) and isinstance(rel_data.get("skill"), dict) else {}
@@ -1215,7 +1225,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
 
             # Backward-compat for older rows without release.description_md.
             if not description_md:
-                skill_resp = client.request(method="GET", path=skill_path, auth=True)
+                skill_resp = client.request(method="GET", path=skill_path, auth=True, auth_optional=True)
                 skill_data = _unwrap_success_envelope(skill_resp.json())
                 fallback_skill = (
                     skill_data.get("skill")
@@ -1297,6 +1307,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
                 path=release_path,
                 params={"page": args.page, "per_page": args.per_page},
                 auth=True,
+                auth_optional=True,
             )
             data = _unwrap_success_envelope(resp.json())
         finally:
@@ -1882,6 +1893,7 @@ def cmd_users(args: argparse.Namespace) -> int:
                 path=f"/v1/user/{user_id}",
                 params={"page": args.page, "per_page": args.per_page},
                 auth=True,
+                auth_optional=True,
             )
             data = _unwrap_success_envelope(resp.json())
         finally:
@@ -2181,9 +2193,58 @@ def cmd_request(args: argparse.Namespace) -> int:
         client.close()
 
 
+def cmd_help(args: argparse.Namespace) -> int:
+    if getattr(args, "topic", None):
+        parser = build_parser()
+        try:
+            parser.parse_args([args.topic, "--help"])
+        except SystemExit as e:
+            return int(e.code or 0)
+        return 0
+
+    print(
+        textwrap.dedent(
+            """\
+            SkillDock CLI (skilldock) lets you work with the SkillDock API and skill registry from your terminal.
+
+            What you can do:
+              - Authenticate and manage tokens (`auth`, `tokens`)
+              - Explore and call API endpoints (`ops`, `call`, `request`)
+              - Search, inspect, buy, and manage registry skills (`skills`)
+              - Verify and publish your own skills (`skill verify`, `skill upload`)
+              - Install/uninstall local skills with dependency resolution (`install`, `uninstall`)
+              - Manage namespaces and view user profiles (`namespaces`, `users`)
+
+            Quick examples:
+              skilldock auth login
+                Browser login and save a CLI token
+              skilldock skills search docker
+                Search skills in the registry
+              skilldock i acme/my-skill
+                Install a skill locally (alias of `install`)
+              skilldock skill verify .
+                Validate/package a local skill folder
+              skilldock skill upload --namespace myorg --slug my-skill --path .
+                Publish a skill release
+              skilldock ops
+                List API operations from OpenAPI
+              skilldock call SomeOperationId --param id=123
+                Call an API operation by operationId
+
+            More help:
+              skilldock <command> --help
+              skilldock help <command>
+            """
+        ).rstrip()
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.cmd in ("help", "h"):
+            return cmd_help(args)
         if args.cmd == "config":
             return cmd_config(args)
         if args.cmd == "auth":

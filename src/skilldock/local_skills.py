@@ -614,6 +614,7 @@ class ApiReleaseRepository:
             path=path,
             params=params,
             auth=self._auth_for_url(path),
+            auth_optional=True,
         )
         return _unwrap_success_envelope(resp.json())
 
@@ -685,7 +686,12 @@ class ApiReleaseRepository:
         if not download_url:
             raise SkilldockError(f"Release {release.ref.key}@{release.version} has no download URL.")
 
-        resp = self._client.request(method="GET", path=download_url, auth=self._auth_for_url(download_url))
+        resp = self._client.request(
+            method="GET",
+            path=download_url,
+            auth=self._auth_for_url(download_url),
+            auth_optional=True,
+        )
         return resp.content
 
 

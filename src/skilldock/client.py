@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
-from functools import wraps
+import sys
+import time
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
 from urllib.parse import quote
 
@@ -40,6 +43,37 @@ def _apply_auth(headers: dict[str, str], auth: AuthStrategy, token: str) -> None
     # Default: Bearer.
     scheme = auth.scheme or "Bearer"
     headers[auth.header] = f"{scheme} {token}".strip()
+
+
+def _decode_jwt_unverified(token: str) -> dict[str, Any] | None:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    payload_b64 = parts[1] + ("=" * (-len(parts[1]) % 4))
+    try:
+        data = base64.urlsafe_b64decode(payload_b64.encode("ascii"))
+        obj = json.loads(data.decode("utf-8"))
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _jwt_exp_unverified(token: str) -> float | None:
+    payload = _decode_jwt_unverified(token)
+    if not payload:
+        return None
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)):
+        return float(exp)
+    return None
+
+
+def _is_token_expired_unverified(token: str, *, now: float | None = None, skew_s: float = 30.0) -> bool:
+    exp = _jwt_exp_unverified(token)
+    if exp is None:
+        return False
+    now_ts = time.time() if now is None else now
+    return exp <= (now_ts + skew_s)
 
 
 class OperationsProxy:
@@ -133,6 +167,7 @@ class SkilldockClient:
         self._http = httpx.Client(timeout=timeout_s, follow_redirects=True)
         self._spec: OpenAPISpec | None = None
         self._ops_proxy: OperationsProxy | None = None
+        self._auth_optional_warning_printed = False
 
     def close(self) -> None:
         self._http.close()
@@ -184,9 +219,76 @@ class SkilldockClient:
         files: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         auth: bool = True,
+        auth_optional: bool = False,
     ) -> httpx.Response:
         if content is not None and (json_body is not None or data is not None or files is not None):
             raise SkilldockError("Pass only one of content/json_body/data/files.")
+        if auth_optional and not auth:
+            auth_optional = False
+
+        send_auth = bool(auth and self.token)
+        if auth_optional and send_auth and self.token and _is_token_expired_unverified(self.token):
+            self._warn_auth_optional_fallback(
+                "configured token appears expired; continuing as unauthenticated client for a public request"
+            )
+            send_auth = False
+
+        try:
+            return self._request_once(
+                method=method,
+                path=path,
+                params=params,
+                json_body=json_body,
+                content=content,
+                data=data,
+                files=files,
+                headers=headers,
+                auth=send_auth,
+            )
+        except SkilldockHTTPError as e:
+            if not (auth_optional and send_auth and self._should_retry_unauthenticated(e)):
+                raise
+            self._warn_auth_optional_fallback(
+                f"token was rejected for a public request (HTTP {e.status_code}); retrying without authentication"
+            )
+            return self._request_once(
+                method=method,
+                path=path,
+                params=params,
+                json_body=json_body,
+                content=content,
+                data=data,
+                files=files,
+                headers=headers,
+                auth=False,
+            )
+
+    def _warn_auth_optional_fallback(self, message: str) -> None:
+        if self._auth_optional_warning_printed:
+            return
+        self._auth_optional_warning_printed = True
+        print(f"warning: {message}", file=sys.stderr)
+
+    def _should_retry_unauthenticated(self, err: SkilldockHTTPError) -> bool:
+        if err.status_code in (401, 403):
+            return True
+        if 500 <= err.status_code <= 599:
+            return True
+        return False
+
+    def _request_once(
+        self,
+        *,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+        content: bytes | str | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        auth: bool = True,
+    ) -> httpx.Response:
         if path.startswith(("http://", "https://")):
             url = path
         else:

@@ -39,6 +39,7 @@ class TestSkillsSearch(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client_cls.call_args.kwargs["token"], "tok_123")
         self.assertTrue(mock_client.request.call_args.kwargs["auth"])
+        self.assertTrue(mock_client.request.call_args.kwargs["auth_optional"])
         self.assertEqual(mock_client.request.call_args.kwargs["method"], "POST")
         self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v2/search")
         self.assertEqual(
@@ -74,6 +75,7 @@ class TestSkillsSearch(unittest.TestCase):
             rc = cmd_skills(args)
 
         self.assertEqual(rc, 0)
+        self.assertTrue(mock_client.request.call_args.kwargs["auth_optional"])
         out = stdout.getvalue()
         self.assertIn("description_source: latest_release.description_md", out)
         self.assertIn("created_at: 2026-01-15T08:30:00.000Z", out)
@@ -115,6 +117,7 @@ class TestSkillsSearch(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         out = stdout.getvalue()
+        self.assertTrue(all(call.kwargs.get("auth_optional") for call in mock_client.request.call_args_list))
         self.assertIn("description_source: skill.description_md", out)
         self.assertIn("created_at: 2026-01-15T08:30:00.000Z", out)
         self.assertIn("  total: 1200", out)
@@ -646,6 +649,39 @@ class TestInstallShorthand(unittest.TestCase):
         self.assertIn("cause[2]: SkilldockHTTPError: HTTP 404 Not Found.", err)
 
 
+class TestHelpCommand(unittest.TestCase):
+    def test_help_aliases_parse(self) -> None:
+        self.assertEqual(build_parser().parse_args(["help"]).cmd, "help")
+        self.assertEqual(build_parser().parse_args(["h"]).cmd, "h")
+
+    def test_main_help_prints_friendly_overview(self) -> None:
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            rc = main(["help"])
+
+        self.assertEqual(rc, 0)
+        out = stdout.getvalue()
+        self.assertIn("SkillDock CLI (skilldock)", out)
+        self.assertIn("What you can do:", out)
+        self.assertIn("skilldock skills search docker", out)
+        self.assertIn("skilldock help <command>", out)
+
+    def test_main_h_alias_prints_friendly_overview(self) -> None:
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            rc = main(["h"])
+
+        self.assertEqual(rc, 0)
+        self.assertIn("SkillDock CLI (skilldock)", stdout.getvalue())
+
+    def test_help_topic_prints_argparse_help_for_command(self) -> None:
+        with patch("sys.stdout", new=io.StringIO()) as stdout:
+            rc = main(["help", "skills"])
+
+        self.assertEqual(rc, 0)
+        out = stdout.getvalue()
+        self.assertIn("usage: skilldock skills", out)
+        self.assertIn("search              Search skills", out)
+
+
 class TestRuntimeClient(unittest.TestCase):
     def test_make_runtime_client_keeps_configured_token(self) -> None:
         args = SimpleNamespace(openapi_url=None, base_url=None, token=None, timeout_s=None)
@@ -703,6 +739,7 @@ class TestUsersGet(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/user/123")
         self.assertEqual(mock_client.request.call_args.kwargs["params"], {"page": 1, "per_page": 20})
+        self.assertTrue(mock_client.request.call_args.kwargs["auth_optional"])
         out = stdout.getvalue()
         self.assertIn("user_id: 123", out)
         self.assertIn("display_name: Jane Doe", out)

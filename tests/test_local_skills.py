@@ -108,7 +108,15 @@ class _CaptureApiClient:
         self.calls: list[dict[str, object]] = []
 
     def request(self, *, method: str, path: str, params=None, auth: bool = True, **kwargs):
-        self.calls.append({"method": method, "path": path, "params": params, "auth": auth})
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "params": params,
+                "auth": auth,
+                "auth_optional": bool(kwargs.get("auth_optional")),
+            }
+        )
         if path.endswith("/releases"):
             page = 1
             if isinstance(params, dict) and isinstance(params.get("page"), int):
@@ -415,8 +423,10 @@ class TestApiReleaseRepositoryAuth(unittest.TestCase):
         repo.list_releases(ref)
 
         self.assertTrue(client.calls[0]["auth"])
+        self.assertTrue(client.calls[0]["auth_optional"])
         self.assertEqual(client.calls[0]["params"], {"page": 1, "per_page": 100})
         self.assertEqual(client.calls[1]["params"], {"page": 2, "per_page": 100})
+        self.assertTrue(client.calls[1]["auth_optional"])
 
     def test_list_releases_uses_anonymous_when_token_missing(self) -> None:
         client = _CaptureApiClient(token=None)
@@ -426,6 +436,7 @@ class TestApiReleaseRepositoryAuth(unittest.TestCase):
         repo.list_releases(ref)
 
         self.assertFalse(client.calls[0]["auth"])
+        self.assertTrue(client.calls[0]["auth_optional"])
 
     def test_download_archive_sends_auth_for_internal_file_url(self) -> None:
         client = _CaptureApiClient(token="tok_123")
@@ -441,6 +452,7 @@ class TestApiReleaseRepositoryAuth(unittest.TestCase):
 
         self.assertEqual(data, b"zip-bytes")
         self.assertTrue(client.calls[-1]["auth"])
+        self.assertTrue(client.calls[-1]["auth_optional"])
 
     def test_download_archive_does_not_send_auth_to_external_host(self) -> None:
         client = _CaptureApiClient(token="tok_123")
@@ -456,3 +468,4 @@ class TestApiReleaseRepositoryAuth(unittest.TestCase):
 
         self.assertEqual(data, b"zip-bytes")
         self.assertFalse(client.calls[-1]["auth"])
+        self.assertTrue(client.calls[-1]["auth_optional"])
