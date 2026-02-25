@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from skilldock.cli import _make_runtime_client, build_parser, cmd_install, cmd_skill, cmd_skills, cmd_users
+from skilldock.cli import _make_runtime_client, build_parser, cmd_install, cmd_skill, cmd_skills, cmd_users, main
 from skilldock.client import SkilldockError, SkilldockHTTPError
 from skilldock.config import DEFAULT_OPENAPI_URL, Config
 
@@ -618,6 +618,32 @@ class TestInstallShorthand(unittest.TestCase):
             cmd_install(args)
 
         self.assertIn("either as @<version> or --version", str(ctx.exception))
+
+    def test_install_parser_accepts_verbose_errors_flag(self) -> None:
+        args = build_parser().parse_args(["install", "acme/my-skill", "--verbose-errors"])
+        self.assertTrue(args.verbose_errors)
+
+    def test_main_install_verbose_errors_prints_cause_chain(self) -> None:
+        def _raise_nested(*_args, **_kwargs):
+            http_err = SkilldockHTTPError(404, '{"detail":"missing"}')
+            inner = SkilldockError("Skill not found or not visible: acme/my-skill")
+            inner.__cause__ = http_err
+            outer = SkilldockError("Could not resolve dependency graph. Last error: Skill not found or not visible: acme/my-skill")
+            outer.__cause__ = inner
+            raise outer
+
+        with (
+            patch("skilldock.cli.cmd_install", side_effect=_raise_nested),
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
+            rc = main(["install", "acme/my-skill", "--verbose-errors"])
+
+        self.assertEqual(rc, 1)
+        err = stderr.getvalue()
+        self.assertIn("error: Could not resolve dependency graph.", err)
+        self.assertIn("error_details:", err)
+        self.assertIn("cause[1]: SkilldockError: Skill not found or not visible: acme/my-skill", err)
+        self.assertIn("cause[2]: SkilldockHTTPError: HTTP 404 Not Found.", err)
 
 
 class TestRuntimeClient(unittest.TestCase):

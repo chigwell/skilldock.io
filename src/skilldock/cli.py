@@ -528,6 +528,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="./skills",
         help="Local skills directory (default: ./skills)",
     )
+    install.add_argument(
+        "--verbose-errors",
+        action="store_true",
+        help="Show chained error causes (useful for dependency resolution/API visibility issues)",
+    )
     install.add_argument("--json", action="store_true", help="Output JSON")
 
     uninstall = sub.add_parser(
@@ -541,6 +546,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--skills-dir",
         default="./skills",
         help="Local skills directory (default: ./skills)",
+    )
+    uninstall.add_argument(
+        "--verbose-errors",
+        action="store_true",
+        help="Show chained error causes",
     )
     uninstall.add_argument("--json", action="store_true", help="Output JSON")
 
@@ -2090,6 +2100,32 @@ def _format_http_error(err: SkilldockHTTPError) -> str:
     return base
 
 
+def _format_error_with_type(err: BaseException) -> str:
+    if isinstance(err, SkilldockHTTPError):
+        msg = _format_http_error(err)
+    else:
+        msg = str(err).strip() or err.__class__.__name__
+    return f"{err.__class__.__name__}: {msg}"
+
+
+def _iter_error_chain(err: BaseException):
+    seen: set[int] = set()
+    cur: BaseException | None = err
+    while cur is not None and id(cur) not in seen:
+        yield cur
+        seen.add(id(cur))
+        cur = cur.__cause__ if cur.__cause__ is not None else cur.__context__
+
+
+def _print_verbose_error_chain(err: BaseException) -> None:
+    chain = list(_iter_error_chain(err))
+    if len(chain) <= 1:
+        return
+    print("error_details:", file=sys.stderr)
+    for idx, item in enumerate(chain[1:], start=1):
+        print(f"  cause[{idx}]: {_format_error_with_type(item)}", file=sys.stderr)
+
+
 def cmd_call(args: argparse.Namespace) -> int:
     cfg_file = load_config()
     cfg = _merge_cfg(cfg_file, args)
@@ -2175,9 +2211,13 @@ def main(argv: list[str] | None = None) -> int:
         raise AssertionError("unreachable")
     except SkilldockHTTPError as e:
         print(f"error: {_format_http_error(e)}", file=sys.stderr)
+        if getattr(args, "verbose_errors", False):
+            _print_verbose_error_chain(e)
         return 1
     except (OperationNotFoundError, AuthRequiredError, SkilldockError) as e:
         print(f"error: {e}", file=sys.stderr)
+        if getattr(args, "verbose_errors", False):
+            _print_verbose_error_chain(e)
         return 1
 
 

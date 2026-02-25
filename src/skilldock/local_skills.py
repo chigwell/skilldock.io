@@ -383,7 +383,7 @@ def resolve_dependency_graph(
 ) -> tuple[dict[str, SkillRelease], dict[str, list[Requirement]]]:
     constraints: dict[str, list[Requirement]] = {}
     pending: list[str] = []
-    last_error: str | None = None
+    last_error: SkilldockError | None = None
 
     for key, spec in sorted(direct_requirements.items()):
         ref = parse_skill_ref(key)
@@ -421,7 +421,7 @@ def resolve_dependency_graph(
         try:
             candidates = _candidate_releases(ref, reqs, repo)
         except SkilldockError as e:
-            last_error = str(e)
+            last_error = e
             return None
         for candidate in candidates:
             selected_next = dict(selected_mut)
@@ -459,7 +459,7 @@ def resolve_dependency_graph(
     solved = _search(selected={}, constraints_map=constraints, pending_keys=pending)
     if solved is None:
         if last_error:
-            raise SkilldockError(f"Could not resolve dependency graph. Last error: {last_error}")
+            raise SkilldockError(f"Could not resolve dependency graph. Last error: {last_error}") from last_error
         raise SkilldockError("Could not resolve dependency graph.")
     return solved
 
