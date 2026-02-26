@@ -5,10 +5,12 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import sys
 import textwrap
 import time
 import webbrowser
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
@@ -18,6 +20,10 @@ from .client import AuthRequiredError, OperationNotFoundError, SkilldockClient, 
 from .config import DEFAULT_OPENAPI_URL, Config, load_config, redact_token, save_config
 from .local_skills import ApiReleaseRepository, LocalSkillManager, parse_skill_ref
 from .skill_package import SkillPackageError, package_skill
+
+
+_USD_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,2})?$")
+_TON_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,9})?$")
 
 
 def _jsonish(v: str) -> Any:
@@ -66,6 +72,21 @@ def _load_headers(kvs: list[str]) -> dict[str, str]:
         k, v = kv.split(":", 1)
         headers[k.strip()] = v.strip()
     return headers
+
+
+def _validate_positive_decimal_string(value: str, *, field: str, pattern: re.Pattern[str], scale_label: str) -> str:
+    s = str(value).strip()
+    if not s:
+        raise SkilldockError(f"{field} is required.")
+    if not pattern.fullmatch(s):
+        raise SkilldockError(f"{field} must be a positive decimal string with max {scale_label}.")
+    try:
+        amount = Decimal(s)
+    except (InvalidOperation, ValueError):
+        raise SkilldockError(f"{field} must be a valid decimal string.") from None
+    if amount <= 0:
+        raise SkilldockError(f"{field} must be > 0.")
+    return s
 
 
 def _merge_cfg(base: Config, args: argparse.Namespace) -> Config:
@@ -456,7 +477,10 @@ def build_parser() -> argparse.ArgumentParser:
     skills_set_price = skills_sub.add_parser("set-price", help="Set active sale price for a skill")
     _add_runtime_overrides(skills_set_price)
     skills_set_price.add_argument("skill", help="Skill identifier in form namespace/slug")
-    skills_set_price.add_argument("--price-usd", required=True, help='Price in USD, e.g. "12.00"')
+    skills_set_price.add_argument("--pricing-mode", choices=("fixed_usd", "fixed_ton"))
+    price_group = skills_set_price.add_mutually_exclusive_group(required=True)
+    price_group.add_argument("--price-usd", help='USD price, e.g. "12.00"')
+    price_group.add_argument("--price-ton", help='TON price decimal string, e.g. "2.750000000"')
     skills_set_price.add_argument("--json", action="store_true", help="Output JSON")
 
     skills_set_commerce = skills_sub.add_parser("set-commerce", help="Set skill commerce flags and selling description")
@@ -1381,13 +1405,38 @@ def cmd_skills(args: argparse.Namespace) -> int:
             raise SkilldockError("Missing token. Run `skilldock auth login` first.")
         _require_fresh_token(cfg.token)
         ref = parse_skill_ref(args.skill)
+        pricing_mode = getattr(args, "pricing_mode", None)
+        price_usd = getattr(args, "price_usd", None)
+        price_ton = getattr(args, "price_ton", None)
+
+        if pricing_mode == "fixed_usd" and not price_usd:
+            raise SkilldockError("--pricing-mode fixed_usd requires --price-usd.")
+        if pricing_mode == "fixed_ton" and not price_ton:
+            raise SkilldockError("--pricing-mode fixed_ton requires --price-ton.")
+        if price_usd and pricing_mode == "fixed_ton":
+            raise SkilldockError("--price-usd cannot be used with --pricing-mode fixed_ton.")
+        if price_ton and pricing_mode == "fixed_usd":
+            raise SkilldockError("--price-ton cannot be used with --pricing-mode fixed_usd.")
+
+        if price_usd:
+            price_usd = _validate_positive_decimal_string(price_usd, field="price_usd", pattern=_USD_AMOUNT_RE, scale_label="2 decimal places")
+        if price_ton:
+            price_ton = _validate_positive_decimal_string(price_ton, field="price_ton", pattern=_TON_AMOUNT_RE, scale_label="9 decimal places")
+
+        if price_ton:
+            body: dict[str, Any] = {"pricing_mode": "fixed_ton", "price_ton": price_ton}
+        elif pricing_mode == "fixed_usd":
+            body = {"pricing_mode": "fixed_usd", "price_usd": price_usd}
+        else:
+            # Preserve legacy request shape for compatibility with older servers.
+            body = {"price_usd": price_usd}
 
         client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
         try:
             resp = client.request(
                 method="POST",
                 path=f"/v1/skills/{quote(ref.namespace, safe='')}/{quote(ref.slug, safe='')}/prices",
-                json_body={"price_usd": args.price_usd},
+                json_body=body,
                 auth=True,
             )
             data = _unwrap_success_envelope(resp.json())
@@ -1400,7 +1449,10 @@ def cmd_skills(args: argparse.Namespace) -> int:
         price = data.get("price") if isinstance(data, dict) and isinstance(data.get("price"), dict) else {}
         print(f"skill: {ref.key}")
         print(f"price_id: {str(price.get('id', ''))}")
+        print(f"pricing_mode: {str(price.get('pricing_mode', ''))}")
         print(f"price_usd: {str(price.get('price_usd', ''))}")
+        print(f"price_ton: {str(price.get('price_ton', ''))}")
+        print(f"price_ton_nano: {str(price.get('price_ton_nano', ''))}")
         print(f"created_at: {str(price.get('created_at', ''))}")
         return 0
 
@@ -1442,7 +1494,10 @@ def cmd_skills(args: argparse.Namespace) -> int:
         print(f"skill: {str(skill_obj.get('namespace', ''))}/{str(skill_obj.get('slug', ''))}".strip("/"))
         print(f"visibility: {str(skill_obj.get('visibility', ''))}")
         print(f"is_for_sale: {'true' if bool(sale_obj.get('is_for_sale')) else 'false'}")
+        print(f"active_pricing_mode: {str(sale_obj.get('active_pricing_mode', ''))}")
         print(f"active_price_usd: {str(sale_obj.get('active_price_usd', ''))}")
+        print(f"active_price_ton: {str(sale_obj.get('active_price_ton', ''))}")
+        print(f"active_price_ton_nano: {str(sale_obj.get('active_price_ton_nano', ''))}")
         print(f"sold_total: {str(sale_obj.get('sold_total', ''))}")
         print(f"owner_setup_status: {str(owner_setup.get('status', ''))}")
         missing = owner_setup.get("missing_requirements")
@@ -1501,7 +1556,15 @@ def cmd_skills(args: argparse.Namespace) -> int:
         print(f"status: {str(invoice.get('status', ''))}")
         print(f"pay_to_address: {str(invoice.get('pay_to_address', ''))}")
         print(f"memo: {str(invoice.get('memo', ''))}")
+        print(f"payment_provider: {str(invoice.get('payment_provider', ''))}")
+        print(f"pricing_mode_snapshot: {str(invoice.get('pricing_mode_snapshot', ''))}")
         print(f"amount_ton: {str(invoice.get('amount_ton', ''))}")
+        print(f"amount_ton_nano: {str(invoice.get('amount_ton_nano', ''))}")
+        print(f"amount_usd: {str(invoice.get('amount_usd', ''))}")
+        print(
+            f"amount_usd_is_reference_only: "
+            f"{'true' if bool(invoice.get('amount_usd_is_reference_only')) else 'false'}"
+        )
         print(f"expires_at: {str(invoice.get('expires_at', ''))}")
         print(f"access_granted: {'true' if bool(invoice.get('access_granted')) else 'false'}")
         return 0
@@ -1533,6 +1596,15 @@ def cmd_skills(args: argparse.Namespace) -> int:
         invoice = data.get("invoice") if isinstance(data, dict) and isinstance(data.get("invoice"), dict) else {}
         print(f"invoice_id: {str(invoice.get('id', ''))}")
         print(f"status: {str(invoice.get('status', ''))}")
+        print(f"payment_provider: {str(invoice.get('payment_provider', ''))}")
+        print(f"pricing_mode_snapshot: {str(invoice.get('pricing_mode_snapshot', ''))}")
+        print(f"amount_ton: {str(invoice.get('amount_ton', ''))}")
+        print(f"amount_ton_nano: {str(invoice.get('amount_ton_nano', ''))}")
+        print(f"amount_usd: {str(invoice.get('amount_usd', ''))}")
+        print(
+            f"amount_usd_is_reference_only: "
+            f"{'true' if bool(invoice.get('amount_usd_is_reference_only')) else 'false'}"
+        )
         print(f"paid_at: {str(invoice.get('paid_at', ''))}")
         print(f"tx_hash: {str(invoice.get('tx_hash', ''))}")
         print(f"access_granted: {'true' if bool(invoice.get('access_granted')) else 'false'}")

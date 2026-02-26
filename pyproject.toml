@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "skilldock"
-version = "2026.02.251743"
+version = "2026.02.261559"
 description = "OpenAPI-driven Python SDK and CLI for the SkillDock.io API."
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -801,6 +801,75 @@ class TestSkillsCommerce(unittest.TestCase):
         self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/skills/acme/my-skill/prices")
         self.assertEqual(mock_client.request.call_args.kwargs["json_body"], {"price_usd": "12.00"})
 
+    def test_set_price_fixed_usd_explicit_mode_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(
+            ["skills", "set-price", "acme/my-skill", "--pricing-mode", "fixed_usd", "--price-usd", "12.00"]
+        )
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {
+            "price": {
+                "id": 8,
+                "pricing_mode": "fixed_usd",
+                "price_usd": "12.00",
+                "price_ton": None,
+                "price_ton_nano": None,
+                "created_at": "2026-02-21T10:05:00.000Z",
+            }
+        }
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            mock_client.request.call_args.kwargs["json_body"],
+            {"pricing_mode": "fixed_usd", "price_usd": "12.00"},
+        )
+
+    def test_set_price_fixed_ton_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(
+            ["skills", "set-price", "acme/my-skill", "--pricing-mode", "fixed_ton", "--price-ton", "2.750000000"]
+        )
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {
+            "price": {
+                "id": 9,
+                "pricing_mode": "fixed_ton",
+                "price_usd": None,
+                "price_ton": "2.750000000",
+                "price_ton_nano": 2750000000,
+                "created_at": "2026-02-26T12:00:00.000Z",
+            }
+        }
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/skills/acme/my-skill/prices")
+        self.assertEqual(
+            mock_client.request.call_args.kwargs["json_body"],
+            {"pricing_mode": "fixed_ton", "price_ton": "2.750000000"},
+        )
+
     def test_set_commerce_calls_endpoint(self) -> None:
         args = build_parser().parse_args(
             [
