@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import builtins
 import json
 import mimetypes
 import os
@@ -10,10 +11,20 @@ import sys
 import textwrap
 import time
 import webbrowser
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
+
+try:
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+except Exception:  # pragma: no cover - optional runtime dependency
+    Console = None  # type: ignore[assignment]
+    Table = None  # type: ignore[assignment]
+    box = None  # type: ignore[assignment]
 
 from ._version import __version__
 from .client import AuthRequiredError, OperationNotFoundError, SkilldockClient, SkilldockError, SkilldockHTTPError
@@ -24,6 +35,28 @@ from .skill_package import SkillPackageError, package_skill
 
 _USD_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,2})?$")
 _TON_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,9})?$")
+
+
+def _console_print(*values: Any, sep: str = " ", end: str = "\n", file: Any | None = None, flush: bool = False) -> None:
+    if Console is None:
+        builtins.print(*values, sep=sep, end=end, file=file, flush=flush)
+        return
+
+    target = file if file is not None else sys.stdout
+    text = sep.join(str(v) for v in values)
+    console = Console(
+        file=target,
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+    console.print(text, end=end)
+    if flush and hasattr(target, "flush"):
+        target.flush()
+
+
+# Route all CLI text output through Rich when available, preserving legacy print semantics.
+print = _console_print  # type: ignore[assignment]
 
 
 def _jsonish(v: str) -> Any:
@@ -231,6 +264,18 @@ def _unwrap_success_envelope(obj: Any) -> Any:
 def _print_table(rows: list[list[str]]) -> None:
     if not rows:
         return
+    if Table is not None and box is not None and rows[0]:
+        table = Table(
+            show_header=True,
+            header_style="bold",
+            box=box.SIMPLE_HEAVY,
+        )
+        for header in rows[0]:
+            table.add_column(str(header))
+        for row in rows[1:]:
+            table.add_row(*[str(c) for c in row])
+        Console(file=sys.stdout, markup=False, highlight=False).print(table)
+        return
     widths = [0] * len(rows[0])
     for r in rows:
         for i, c in enumerate(r):
@@ -312,6 +357,169 @@ def _extract_author_summary(obj: Any) -> tuple[str, str, str]:
         str(display_name).strip() if display_name is not None else "",
         str(google_picture).strip() if google_picture is not None else "",
     )
+
+
+def _aligned_openapi_url_for_save(
+    *,
+    cfg_file: Config,
+    cfg: Config,
+    base_url: str,
+    args: argparse.Namespace,
+) -> str:
+    if (
+        getattr(args, "openapi_url", None) is None
+        and os.getenv("SKILLDOCK_OPENAPI_URL") is None
+        and cfg_file.openapi_url == DEFAULT_OPENAPI_URL
+    ):
+        return f"{(cfg.base_url or base_url).rstrip('/')}/openapi.json"
+    return cfg_file.openapi_url
+
+
+def _save_token_config(
+    *,
+    cfg_file: Config,
+    cfg: Config,
+    args: argparse.Namespace,
+    base_url: str,
+    token: str,
+    refresh_token: str | None,
+    token_expires_at: float | None,
+) -> None:
+    new_cfg = Config(
+        openapi_url=_aligned_openapi_url_for_save(cfg_file=cfg_file, cfg=cfg, base_url=base_url, args=args),
+        base_url=cfg.base_url or base_url,
+        token=token,
+        refresh_token=refresh_token,
+        token_expires_at=token_expires_at,
+        timeout_s=cfg_file.timeout_s,
+        auth_header=cfg_file.auth_header,
+        auth_scheme=cfg_file.auth_scheme,
+    )
+    save_config(new_cfg)
+
+
+def _token_rows(items: list[dict[str, Any]]) -> list[list[str]]:
+    def _s(v: Any) -> str:
+        return "" if v is None else str(v)
+
+    rows: list[list[str]] = [["ID", "PREFIX", "SCOPES", "CREATED_AT", "EXPIRES_AT", "REVOKED_AT", "LAST_USED_AT"]]
+    for it in items:
+        scopes = it.get("scopes")
+        if isinstance(scopes, list):
+            scopes_s = ",".join(str(s) for s in scopes)
+        else:
+            scopes_s = _s(scopes)
+        rows.append(
+            [
+                _s(it.get("id", "")),
+                _s(it.get("token_prefix", "")),
+                scopes_s,
+                _s(it.get("created_at", "")),
+                _s(it.get("expires_at", "")),
+                _s(it.get("revoked_at", "")),
+                _s(it.get("last_used_at", "")),
+            ]
+        )
+    return rows
+
+
+def _parse_rfc3339_to_epoch(value: Any) -> float | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _token_is_usable(item: dict[str, Any], *, now_ts: float | None = None) -> bool:
+    revoked_at = item.get("revoked_at")
+    if isinstance(revoked_at, str) and revoked_at.strip():
+        return False
+    exp = _parse_rfc3339_to_epoch(item.get("expires_at"))
+    if exp is None:
+        return True
+    return exp > ((time.time() if now_ts is None else now_ts) + 30.0)
+
+
+def _list_all_personal_tokens(client: SkilldockClient) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        resp = client.request(method="GET", path="/v1/tokens", params={"page": page, "per_page": 100}, auth=True)
+        data = _unwrap_success_envelope(resp.json())
+        page_items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(page_items, list):
+            break
+        for it in page_items:
+            if isinstance(it, dict):
+                items.append(it)
+        has_more = bool(data.get("has_more")) if isinstance(data, dict) else False
+        if not has_more:
+            break
+        page += 1
+    return items
+
+
+def _bootstrap_personal_token_after_oauth(
+    *,
+    cfg_file: Config,
+    cfg: Config,
+    args: argparse.Namespace,
+    base_url: str,
+    oauth_access_token: str,
+) -> bool:
+    """
+    Returns True when a new personal token was created and saved as default.
+    """
+    client = SkilldockClient(
+        openapi_url=cfg.openapi_url,
+        base_url=base_url,
+        token=oauth_access_token,
+        timeout_s=cfg.timeout_s,
+    )
+    try:
+        items = _list_all_personal_tokens(client)
+        print(f"personal_tokens: {len(items)}")
+        if items:
+            _print_table(_token_rows(items))
+
+        active_or_unexpired = [it for it in items if _token_is_usable(it)]
+        if active_or_unexpired:
+            print("Personal API token(s) already exist. Keeping current OAuth token as active CLI token.")
+            return False
+
+        print("No active personal API tokens found. Creating one and saving it as default...")
+        created_resp = client.request(method="POST", path="/v1/tokens", auth=True)
+        created = _unwrap_success_envelope(created_resp.json())
+        if not isinstance(created, dict):
+            raise SkilldockError("Unexpected response while creating a personal token.")
+        token = created.get("token")
+        if not isinstance(token, str) or not token:
+            raise SkilldockError("Created token response is missing `token`.")
+
+        _save_token_config(
+            cfg_file=cfg_file,
+            cfg=cfg,
+            args=args,
+            base_url=base_url,
+            token=token,
+            refresh_token=None,
+            token_expires_at=_jwt_exp_unverified(token),
+        )
+        token_meta = created.get("token_meta")
+        if isinstance(token_meta, dict):
+            _print_table(_token_rows([token_meta]))
+        print("Created a personal API token and saved it as the default CLI token.")
+        return True
+    finally:
+        client.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -835,27 +1043,37 @@ def cmd_auth(args: argparse.Namespace) -> int:
                     if token_expires_at is None and isinstance(expires_in, (int, float)):
                         token_expires_at = time.time() + float(expires_in)
 
-                    # Keep the spec URL aligned with the base_url when the user is targeting a non-default API.
-                    openapi_url_to_save = cfg_file.openapi_url
-                    if (
-                        getattr(args, "openapi_url", None) is None
-                        and os.getenv("SKILLDOCK_OPENAPI_URL") is None
-                        and cfg_file.openapi_url == DEFAULT_OPENAPI_URL
-                    ):
-                        openapi_url_to_save = f"{(cfg.base_url or base_url).rstrip('/')}/openapi.json"
-
-                    new_cfg = Config(
-                        openapi_url=openapi_url_to_save,
-                        base_url=cfg.base_url or base_url,
+                    _save_token_config(
+                        cfg_file=cfg_file,
+                        cfg=cfg,
+                        args=args,
+                        base_url=base_url,
                         token=access_token,
                         refresh_token=refresh_token,
                         token_expires_at=token_expires_at,
-                        timeout_s=cfg_file.timeout_s,
-                        auth_header=cfg_file.auth_header,
-                        auth_scheme=cfg_file.auth_scheme,
                     )
-                    save_config(new_cfg)
-                    print("Token saved.")
+                    print("OAuth token saved.")
+
+                    try:
+                        created_personal = _bootstrap_personal_token_after_oauth(
+                            cfg_file=cfg_file,
+                            cfg=cfg,
+                            args=args,
+                            base_url=base_url,
+                            oauth_access_token=access_token,
+                        )
+                        if not created_personal:
+                            print(
+                                "tip: existing personal API tokens are listed above; use `skilldock tokens create --save` to rotate.",
+                                file=sys.stderr,
+                            )
+                    except SkilldockHTTPError as e:
+                        print(
+                            f"warning: personal token bootstrap skipped: {_format_http_error(e)}",
+                            file=sys.stderr,
+                        )
+                    except SkilldockError as e:
+                        print(f"warning: personal token bootstrap skipped: {e}", file=sys.stderr)
                     return 0
                 if status in ("denied", "expired"):
                     raise SkilldockError(f"Login {status}.")
@@ -903,45 +1121,18 @@ def cmd_tokens(args: argparse.Namespace) -> int:
             print(token)
 
             if isinstance(token_meta, dict):
-                rows: list[list[str]] = [["FIELD", "VALUE"]]
-                for k in (
-                    "id",
-                    "token_prefix",
-                    "scopes",
-                    "created_at",
-                    "expires_at",
-                    "revoked_at",
-                    "last_used_at",
-                ):
-                    if k not in token_meta:
-                        continue
-                    v = token_meta.get(k)
-                    if isinstance(v, list):
-                        v = ",".join(str(x) for x in v)
-                    rows.append([k, str(v)])
-                _print_table(rows)
+                _print_table(_token_rows([token_meta]))
 
             if args.save:
-                # Keep the spec URL aligned with the base_url when the user is targeting a non-default API.
-                openapi_url_to_save = cfg_file.openapi_url
-                if (
-                    getattr(args, "openapi_url", None) is None
-                    and os.getenv("SKILLDOCK_OPENAPI_URL") is None
-                    and cfg_file.openapi_url == DEFAULT_OPENAPI_URL
-                ):
-                    openapi_url_to_save = f"{(cfg.base_url or base_url).rstrip('/')}/openapi.json"
-
-                new_cfg = Config(
-                    openapi_url=openapi_url_to_save,
-                    base_url=cfg.base_url or base_url,
+                _save_token_config(
+                    cfg_file=cfg_file,
+                    cfg=cfg,
+                    args=args,
+                    base_url=base_url,
                     token=token,
                     refresh_token=None,
                     token_expires_at=_jwt_exp_unverified(token) if token else None,
-                    timeout_s=cfg_file.timeout_s,
-                    auth_header=cfg_file.auth_header,
-                    auth_scheme=cfg_file.auth_scheme,
                 )
-                save_config(new_cfg)
                 print("Token saved.", file=sys.stderr)
             else:
                 print("Tip: save it with: skilldock auth set-token <token>", file=sys.stderr)
@@ -966,27 +1157,8 @@ def cmd_tokens(args: argparse.Namespace) -> int:
                 print(json.dumps(data, indent=2, sort_keys=True))
                 return 0
 
-            rows: list[list[str]] = [["ID", "PREFIX", "SCOPES", "CREATED_AT", "EXPIRES_AT", "REVOKED_AT", "LAST_USED_AT"]]
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                scopes = it.get("scopes")
-                if isinstance(scopes, list):
-                    scopes_s = ",".join(str(s) for s in scopes)
-                else:
-                    scopes_s = str(scopes or "")
-                rows.append(
-                    [
-                        str(it.get("id", "")),
-                        str(it.get("token_prefix", "")),
-                        scopes_s,
-                        str(it.get("created_at", "")),
-                        str(it.get("expires_at", "")),
-                        str(it.get("revoked_at", "")),
-                        str(it.get("last_used_at", "")),
-                    ]
-                )
-            _print_table(rows)
+            token_items = [it for it in items if isinstance(it, dict)]
+            _print_table(_token_rows(token_items))
             return 0
 
         if args.subcmd == "revoke":
@@ -2273,12 +2445,19 @@ def _http_error_code(body: str) -> str | None:
 def _format_http_error(err: SkilldockHTTPError) -> str:
     detail = _http_error_detail(err.body)
     code = _http_error_code(err.body)
+    paid_codes = {"payment_required", "purchase_required", "skill_purchase_required"}
     if err.status_code == 401:
         base = "HTTP 401 Unauthorized. Missing or invalid auth token."
+    elif err.status_code == 402 and (code in paid_codes or (isinstance(detail, str) and "purchase" in detail.lower())):
+        base = "HTTP 402 Payment Required. This skill requires purchase/access before it can be installed."
+    elif err.status_code == 402:
+        base = "HTTP 402 Payment Required. Access requires payment or an active purchase."
     elif err.status_code == 403:
         base = "HTTP 403 Forbidden. You are authenticated but not allowed to access this resource."
     elif err.status_code == 404:
         base = "HTTP 404 Not Found. Resource does not exist or is not visible to your account."
+    elif err.status_code == 410:
+        base = "HTTP 410 Gone. Resource has been deleted or is no longer available."
     elif err.status_code == 409 and code == "price_mode_incompatible":
         base = (
             "HTTP 409 Conflict. Price mode is incompatible with selected payment provider "

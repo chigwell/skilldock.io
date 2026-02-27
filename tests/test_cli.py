@@ -4,7 +4,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from skilldock.cli import _format_http_error, _make_runtime_client, build_parser, cmd_install, cmd_skill, cmd_skills, cmd_users, main
+from skilldock.cli import (
+    _format_http_error,
+    _make_runtime_client,
+    build_parser,
+    cmd_auth,
+    cmd_install,
+    cmd_skill,
+    cmd_skills,
+    cmd_users,
+    main,
+)
 from skilldock.client import SkilldockError, SkilldockHTTPError
 from skilldock.config import DEFAULT_OPENAPI_URL, Config
 
@@ -590,6 +600,127 @@ class TestSkillUpload(unittest.TestCase):
         self.assertIn("http/https", str(ctx.exception))
 
 
+class TestAuthLogin(unittest.TestCase):
+    def test_login_bootstraps_personal_token_when_none_exist(self) -> None:
+        args = build_parser().parse_args(["auth", "login", "--no-open"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token=None,
+            timeout_s=30.0,
+        )
+
+        session_client = Mock()
+        session_client.request.return_value = _FakeResponse(
+            {
+                "session_id": "sess_1",
+                "auth_url": "https://auth.example.com/sess_1",
+                "expires_in": 120,
+                "poll_interval_s": 0.1,
+            }
+        )
+
+        poll_client = Mock()
+        poll_client.request.return_value = _FakeResponse(
+            {
+                "status": "approved",
+                "access_token": "oauth_access_token",
+                "refresh_token": "refresh_1",
+                "expires_in": 3600,
+            }
+        )
+
+        bootstrap_client = Mock()
+        bootstrap_client.request.side_effect = [
+            _FakeResponse({"items": [], "has_more": False}),
+            _FakeResponse({"token": "tok_personal_123", "token_meta": {"id": "tok_1", "token_prefix": "tok_per"}}),
+        ]
+
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient", side_effect=[session_client, poll_client, bootstrap_client]),
+            patch("skilldock.cli.save_config") as save_cfg,
+            patch("skilldock.cli.webbrowser.open") as web_open,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()),
+        ):
+            rc = cmd_auth(args)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(save_cfg.call_count, 2)
+        self.assertFalse(web_open.called)
+        self.assertEqual(save_cfg.call_args_list[0].args[0].token, "oauth_access_token")
+        self.assertEqual(save_cfg.call_args_list[1].args[0].token, "tok_personal_123")
+        self.assertEqual(bootstrap_client.request.call_args_list[0].kwargs["path"], "/v1/tokens")
+        self.assertEqual(bootstrap_client.request.call_args_list[1].kwargs["path"], "/v1/tokens")
+        self.assertIn("personal_tokens: 0", stdout.getvalue())
+        self.assertIn("Created a personal API token and saved it as the default CLI token.", stdout.getvalue())
+
+    def test_login_lists_existing_personal_tokens_and_keeps_oauth_token(self) -> None:
+        args = build_parser().parse_args(["auth", "login", "--no-open"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token=None,
+            timeout_s=30.0,
+        )
+
+        session_client = Mock()
+        session_client.request.return_value = _FakeResponse(
+            {
+                "session_id": "sess_1",
+                "auth_url": "https://auth.example.com/sess_1",
+                "expires_in": 120,
+                "poll_interval_s": 0.1,
+            }
+        )
+
+        poll_client = Mock()
+        poll_client.request.return_value = _FakeResponse(
+            {
+                "status": "approved",
+                "access_token": "oauth_access_token",
+                "refresh_token": "refresh_1",
+                "expires_in": 3600,
+            }
+        )
+
+        bootstrap_client = Mock()
+        bootstrap_client.request.return_value = _FakeResponse(
+            {
+                "items": [
+                    {
+                        "id": "tok_1",
+                        "token_prefix": "tok_exists",
+                        "scopes": ["skills:read"],
+                        "created_at": "2026-02-01T10:00:00Z",
+                        "expires_at": None,
+                        "revoked_at": None,
+                        "last_used_at": None,
+                    }
+                ],
+                "has_more": False,
+            }
+        )
+
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient", side_effect=[session_client, poll_client, bootstrap_client]),
+            patch("skilldock.cli.save_config") as save_cfg,
+            patch("skilldock.cli.webbrowser.open"),
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+            patch("sys.stderr", new=io.StringIO()) as stderr,
+        ):
+            rc = cmd_auth(args)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(save_cfg.call_count, 1)
+        self.assertEqual(save_cfg.call_args.args[0].token, "oauth_access_token")
+        self.assertEqual(bootstrap_client.request.call_count, 1)
+        self.assertIn("personal_tokens: 1", stdout.getvalue())
+        self.assertIn("existing personal API tokens are listed above", stderr.getvalue())
+
+
 class TestInstallShorthand(unittest.TestCase):
     def test_install_accepts_version_shorthand_in_skill_argument(self) -> None:
         args = build_parser().parse_args(["install", "acme/my-skill@1.2.3", "--json"])
@@ -686,6 +817,24 @@ class TestHelpCommand(unittest.TestCase):
 
 
 class TestHttpErrorFormatting(unittest.TestCase):
+    def test_format_402_purchase_required(self) -> None:
+        err = SkilldockHTTPError(
+            402,
+            '{"error":{"code":"purchase_required","message":"Buy this skill first"}}',
+        )
+        msg = _format_http_error(err)
+        self.assertIn("HTTP 402 Payment Required. This skill requires purchase/access before it can be installed.", msg)
+        self.assertIn("Buy this skill first", msg)
+
+    def test_format_410_deleted_resource(self) -> None:
+        err = SkilldockHTTPError(
+            410,
+            '{"detail":"release has been removed"}',
+        )
+        msg = _format_http_error(err)
+        self.assertIn("HTTP 410 Gone. Resource has been deleted or is no longer available.", msg)
+        self.assertIn("release has been removed", msg)
+
     def test_format_409_price_mode_incompatible_flat_code(self) -> None:
         err = SkilldockHTTPError(
             409,

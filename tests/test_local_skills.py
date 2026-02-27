@@ -320,7 +320,8 @@ class TestLocalManager(unittest.TestCase):
             result = manager.install(skill="acme/app", requirement="1.0.0")
 
             self.assertIn("acme/app", result.installed)
-            self.assertIn("Skipping missing direct skill: chigwel/my-skill", result.warnings)
+            self.assertTrue(any(w.startswith("Skipping missing direct skill: chigwel/my-skill") for w in result.warnings))
+            self.assertTrue(any("reason:" in w for w in result.warnings))
             manifest = json.loads((root / ".skilldock.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest.get("direct"), {"acme/app": "1.0.0"})
 

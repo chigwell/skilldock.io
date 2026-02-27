@@ -11,7 +11,7 @@
 
 # SkillDock Python SDK and CLI
 
-`skilldock` is an OpenAPI-driven Python client (and a simple CLI) for the SkillDock API.
+`skilldock` is an OpenAPI-driven Python client (and a CLI) for the SkillDock API.
 
 It loads the OpenAPI spec at runtime and exposes:
 - A Python `SkilldockClient` that can call any `operationId`
@@ -40,6 +40,8 @@ skilldock auth login
 ```
 
 This starts a CLI auth session on the API, prints an `auth_url`, opens it in your browser, then polls until it receives an app-issued `access_token` and saves it as the CLI token.
+After login succeeds, the CLI now also lists your personal API tokens automatically.
+If no active personal tokens exist, it creates one and saves it as your default CLI token for future requests.
 Access tokens are short-lived; if you see auth errors later, run `skilldock auth login` again.
 
 Create a long-lived personal API token (recommended for CI and to avoid short-lived JWT expiry):
@@ -51,6 +53,8 @@ skilldock tokens create --save
 # List your tokens
 skilldock tokens list
 ```
+
+CLI output is rendered with [Rich](https://pypi.org/project/rich/) tables/formatting for better readability.
 
 Call an endpoint by `operationId`:
 
@@ -125,7 +129,12 @@ skilldock i acme/my-skill --version 1.2.3
 
 # custom local destination
 skilldock install acme/my-skill --skills-dir /path/to/project/skills
+
+# include chained/underlying causes in error output
+skilldock install acme/my-skill --verbose-errors
 ```
+
+When install cannot proceed (for example private/deleted skill, no matching release, paid skill access required), warnings/errors include detailed reasons.
 
 Uninstall a direct skill and reconcile/remove no-longer-needed dependencies:
 
@@ -275,6 +284,7 @@ The SkillDock API can accept (depending on server configuration):
 2. Prints the returned `auth_url` and opens it in your browser
 3. After you complete Google login, the backend approves the session
 4. The CLI polls `GET /auth/cli/sessions/{session_id}` until it receives an app-issued `access_token`, then saves it as the configured API token
+5. The CLI lists personal API tokens; if none are active, it creates one and saves it as the default token
 
 If you want to set a token manually:
 

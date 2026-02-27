@@ -334,6 +334,22 @@ def _is_release_unavailable_error(message: str) -> bool:
     return _parse_missing_download_url_error(message) is not None
 
 
+def _summarize_unavailable_reason(message: str) -> str:
+    text = message.strip()
+    if not text:
+        return "unknown reason"
+    lowered = text.lower()
+    if "payment required" in lowered or "purchase required" in lowered or "skill_purchase_required" in lowered:
+        return "access requires purchase"
+    if "not found or not visible" in lowered:
+        return "skill is missing, private, deleted, or not visible to your account"
+    if "no release found for" in lowered:
+        return "no release matches the requested version constraints"
+    if "no downloadable release found for" in lowered:
+        return "release exists but has no downloadable archive"
+    return text
+
+
 def _candidate_releases(ref: SkillRef, requirements: list[Requirement], repo: ReleaseRepository) -> list[SkillRelease]:
     exact_versions = {v for r in requirements if (v := _extract_exact_version(r.specifier)) is not None}
     if len(exact_versions) > 1:
@@ -959,13 +975,19 @@ class LocalSkillManager:
                     )
                     missing_key = m.group(1) if m else None
                 if missing_key and missing_key in effective_direct:
-                    warnings.append(f"Skipping missing direct skill: {missing_key}")
+                    warnings.append(
+                        f"Skipping missing direct skill: {missing_key} "
+                        f"(reason: {_summarize_unavailable_reason(msg)})"
+                    )
                     effective_direct.pop(missing_key, None)
                     continue
                 unresolvable = self._find_unresolvable_direct_skills(effective_direct)
                 if unresolvable:
                     for key in sorted(unresolvable):
-                        warnings.append(f"Skipping unresolved direct skill: {key} ({unresolvable[key]})")
+                        warnings.append(
+                            f"Skipping unresolved direct skill: {key} "
+                            f"(reason: {_summarize_unavailable_reason(unresolvable[key])}; detail: {unresolvable[key]})"
+                        )
                         effective_direct.pop(key, None)
                     continue
                 raise
