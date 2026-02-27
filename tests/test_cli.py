@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from skilldock.cli import _make_runtime_client, build_parser, cmd_install, cmd_skill, cmd_skills, cmd_users, main
+from skilldock.cli import _format_http_error, _make_runtime_client, build_parser, cmd_install, cmd_skill, cmd_skills, cmd_users, main
 from skilldock.client import SkilldockError, SkilldockHTTPError
 from skilldock.config import DEFAULT_OPENAPI_URL, Config
 
@@ -680,6 +680,26 @@ class TestHelpCommand(unittest.TestCase):
         out = stdout.getvalue()
         self.assertIn("usage: skilldock skills", out)
         self.assertIn("search              Search skills", out)
+
+
+class TestHttpErrorFormatting(unittest.TestCase):
+    def test_format_409_price_mode_incompatible_flat_code(self) -> None:
+        err = SkilldockHTTPError(
+            409,
+            '{"code":"price_mode_incompatible","message":"fixed_ton buy is not supported yet"}',
+        )
+        msg = _format_http_error(err)
+        self.assertIn("HTTP 409 Conflict. Checkout is not available yet for this pricing mode", msg)
+        self.assertIn("fixed_ton buy is not supported yet", msg)
+
+    def test_format_409_price_mode_incompatible_nested_error_code(self) -> None:
+        err = SkilldockHTTPError(
+            409,
+            '{"error":{"code":"price_mode_incompatible","detail":"TON checkout coming next"}}',
+        )
+        msg = _format_http_error(err)
+        self.assertIn("HTTP 409 Conflict. Checkout is not available yet for this pricing mode", msg)
+        self.assertIn("TON checkout coming next", msg)
 
 
 class TestRuntimeClient(unittest.TestCase):

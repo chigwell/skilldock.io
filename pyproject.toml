@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "skilldock"
-version = "2026.02.261559"
+version = "2026.02.271155"
 description = "OpenAPI-driven Python SDK and CLI for the SkillDock.io API."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -31,6 +31,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+  "pytest-cov>=5.0.0",
+  "poethepoet>=0.30.0",
   "ruff>=0.5.0",
   "mypy>=1.10.0",
 ]
@@ -57,3 +59,10 @@ exclude = [
   "**/*.pyo",
   "**/*.pyd",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--cov=skilldock --cov-report=term-missing --cov-fail-under=85"
+testpaths = ["tests"]
+
+[tool.poe.tasks]
+test = "pytest"

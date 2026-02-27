@@ -2160,23 +2160,59 @@ def _http_error_detail(body: str) -> str | None:
     except json.JSONDecodeError:
         return text
     if isinstance(obj, dict):
-        for key in ("message", "detail", "error"):
-            value = obj.get(key)
-            if isinstance(value, str):
-                value = value.strip()
-                if value:
-                    return value
+        candidates = [obj]
+        nested_error = obj.get("error")
+        if isinstance(nested_error, dict):
+            candidates.append(nested_error)
+        for item in candidates:
+            for key in ("message", "detail", "error"):
+                value = item.get(key)
+                if isinstance(value, str):
+                    value = value.strip()
+                    if value:
+                        return value
     return text
+
+
+def _http_error_code(body: str) -> str | None:
+    text = body.strip()
+    if not text:
+        return None
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    candidates = [obj]
+    nested_error = obj.get("error")
+    if isinstance(nested_error, dict):
+        candidates.append(nested_error)
+
+    for item in candidates:
+        code = item.get("code")
+        if isinstance(code, str):
+            code = code.strip()
+            if code:
+                return code
+    return None
 
 
 def _format_http_error(err: SkilldockHTTPError) -> str:
     detail = _http_error_detail(err.body)
+    code = _http_error_code(err.body)
     if err.status_code == 401:
         base = "HTTP 401 Unauthorized. Missing or invalid auth token."
     elif err.status_code == 403:
         base = "HTTP 403 Forbidden. You are authenticated but not allowed to access this resource."
     elif err.status_code == 404:
         base = "HTTP 404 Not Found. Resource does not exist or is not visible to your account."
+    elif err.status_code == 409 and code == "price_mode_incompatible":
+        base = (
+            "HTTP 409 Conflict. Checkout is not available yet for this pricing mode "
+            "(for example, TON-priced skills)."
+        )
     else:
         base = f"HTTP {err.status_code}"
     if detail:
