@@ -86,6 +86,26 @@ Browse release history page-by-page:
 skilldock skills releases acme/my-skill --page 1 --per-page 10
 ```
 
+Commerce sell/buy flow (TON):
+
+```bash
+# 1) Seller setup
+skilldock skills set-ton-wallet --ton-wallet-address UQ...
+skilldock skills set-commerce acme/my-skill --is-for-sale true --visibility private --selling-description-md "What buyer sees"
+skilldock skills set-price acme/my-skill --pricing-mode fixed_ton --price-ton 2.750000000
+
+# 2) Buyer invoice create/reuse (TON provider required by current backend)
+skilldock skills buy acme/my-skill --payment-provider ton --referral-code a
+
+# 3) Poll invoice until paid/expired/cancelled
+skilldock skills buy acme/my-skill --payment-provider ton --poll
+# or check a known invoice id
+skilldock skills invoice <invoice_id>
+
+# 4) Confirm inventory
+skilldock skills bought --page 1 --per-page 20
+```
+
 Get author profile details and authored skills (paginated):
 
 ```bash

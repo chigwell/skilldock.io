@@ -263,14 +263,20 @@ def _extract_sale_summary(obj: Any) -> dict[str, Any]:
         return {
             "is_for_sale": False,
             "selling_description_md": "",
+            "pricing_mode": "",
             "price_usd": "0.00",
+            "price_ton": "",
+            "price_ton_nano": "",
             "sold_total": 0,
             "can_buy": False,
         }
     return {
         "is_for_sale": bool(obj.get("is_for_sale")),
         "selling_description_md": str(obj.get("selling_description_md", "")),
+        "pricing_mode": str(obj.get("pricing_mode", obj.get("active_pricing_mode", ""))),
         "price_usd": str(obj.get("price_usd", "0.00")),
+        "price_ton": str(obj.get("price_ton", obj.get("active_price_ton", ""))),
+        "price_ton_nano": str(obj.get("price_ton_nano", obj.get("active_price_ton_nano", ""))),
         "sold_total": _as_int_stat(obj.get("sold_total")),
         "can_buy": bool(obj.get("can_buy")),
     }
@@ -491,10 +497,12 @@ def build_parser() -> argparse.ArgumentParser:
     skills_set_commerce.add_argument("--selling-description-md")
     skills_set_commerce.add_argument("--json", action="store_true", help="Output JSON")
 
-    skills_buy = skills_sub.add_parser("buy", help="Create/reuse invoice and optionally poll until paid or expired")
+    skills_buy = skills_sub.add_parser("buy", help="Create/reuse invoice and optionally poll until paid, expired, or cancelled")
     _add_runtime_overrides(skills_buy)
     skills_buy.add_argument("skill", help="Skill identifier in form namespace/slug")
-    skills_buy.add_argument("--poll", action="store_true", help="Poll invoice status until paid or expired")
+    skills_buy.add_argument("--payment-provider", default="ton", help='Payment provider (default: "ton")')
+    skills_buy.add_argument("--referral-code", help="Optional referral code")
+    skills_buy.add_argument("--poll", action="store_true", help="Poll invoice status until paid, expired, or cancelled")
     skills_buy.add_argument("--poll-interval-s", type=float, default=3.0, help="Polling interval seconds (default: 3)")
     skills_buy.add_argument("--poll-timeout-s", type=float, default=1800.0, help="Polling timeout seconds (default: 1800)")
     skills_buy.add_argument("--json", action="store_true", help="Output JSON")
@@ -510,6 +518,12 @@ def build_parser() -> argparse.ArgumentParser:
     skills_sales.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
     skills_sales.add_argument("--per-page", type=int, default=20, help="Page size (default: 20)")
     skills_sales.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_bought = skills_sub.add_parser("bought", help="List bought skills for current user")
+    _add_runtime_overrides(skills_bought)
+    skills_bought.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
+    skills_bought.add_argument("--per-page", type=int, default=20, help="Page size (default: 20)")
+    skills_bought.add_argument("--json", action="store_true", help="Output JSON")
 
     # skill (local + upload)
     skill = sub.add_parser("skill", help="Local skill packaging and upload")
@@ -1199,7 +1213,10 @@ def cmd_skills(args: argparse.Namespace) -> int:
         print(f"  can_buy: {'true' if access['can_buy'] else 'false'}")
         print("sale:")
         print(f"  is_for_sale: {'true' if sale['is_for_sale'] else 'false'}")
+        print(f"  pricing_mode: {sale['pricing_mode']}")
         print(f"  price_usd: {sale['price_usd']}")
+        print(f"  price_ton: {sale['price_ton']}")
+        print(f"  price_ton_nano: {sale['price_ton_nano']}")
         print(f"  sold_total: {sale['sold_total']}")
         print(f"  can_buy: {'true' if sale['can_buy'] else 'false'}")
         print("downloads:")
@@ -1425,11 +1442,8 @@ def cmd_skills(args: argparse.Namespace) -> int:
 
         if price_ton:
             body: dict[str, Any] = {"pricing_mode": "fixed_ton", "price_ton": price_ton}
-        elif pricing_mode == "fixed_usd":
-            body = {"pricing_mode": "fixed_usd", "price_usd": price_usd}
         else:
-            # Preserve legacy request shape for compatibility with older servers.
-            body = {"price_usd": price_usd}
+            body = {"pricing_mode": "fixed_usd", "price_usd": price_usd}
 
         client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
         try:
@@ -1515,12 +1529,19 @@ def cmd_skills(args: argparse.Namespace) -> int:
             raise SkilldockError("Missing token. Run `skilldock auth login` first.")
         _require_fresh_token(cfg.token)
         ref = parse_skill_ref(args.skill)
+        payment_provider = str(getattr(args, "payment_provider", "ton")).strip() or "ton"
+        referral_code_raw = getattr(args, "referral_code", None)
+        referral_code = str(referral_code_raw).strip() if referral_code_raw is not None else ""
+        body: dict[str, Any] = {"payment_provider": payment_provider}
+        if referral_code:
+            body["referral_code"] = referral_code
 
         client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
         try:
             resp = client.request(
                 method="POST",
                 path=f"/v1/skills/{quote(ref.namespace, safe='')}/{quote(ref.slug, safe='')}/buy",
+                json_body=body,
                 auth=True,
             )
             data = _unwrap_success_envelope(resp.json())
@@ -1533,7 +1554,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
                     if time.time() > deadline:
                         break
                     status = str(invoice.get("status", "")).strip()
-                    if status in ("paid", "expired"):
+                    if status in ("paid", "expired", "cancelled"):
                         break
                     time.sleep(interval_s)
                     st_resp = client.request(
@@ -1608,6 +1629,56 @@ def cmd_skills(args: argparse.Namespace) -> int:
         print(f"paid_at: {str(invoice.get('paid_at', ''))}")
         print(f"tx_hash: {str(invoice.get('tx_hash', ''))}")
         print(f"access_granted: {'true' if bool(invoice.get('access_granted')) else 'false'}")
+        return 0
+
+    if args.subcmd == "bought":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+        if args.page < 1:
+            raise SkilldockError("--page must be >= 1.")
+        if args.per_page < 1:
+            raise SkilldockError("--per-page must be >= 1.")
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="GET",
+                path="/v1/me/bought-skills",
+                params={"page": args.page, "per_page": args.per_page},
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+
+        page = data.get("page") if isinstance(data, dict) else None
+        per_page = data.get("per_page") if isinstance(data, dict) else None
+        has_more = bool(data.get("has_more")) if isinstance(data, dict) else False
+        print(f"page: {page if isinstance(page, int) else args.page}")
+        print(f"per_page: {per_page if isinstance(per_page, int) else args.per_page}")
+        print(f"has_more: {'true' if has_more else 'false'}")
+        items = data.get("items") if isinstance(data, dict) and isinstance(data.get("items"), list) else []
+        rows: list[list[str]] = [["SKILL", "TITLE", "PURCHASED_AT"]]
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            skill_obj = it.get("skill") if isinstance(it.get("skill"), dict) else {}
+            namespace = str(skill_obj.get("namespace", "")).strip() or str(it.get("namespace", "")).strip()
+            slug = str(skill_obj.get("slug", "")).strip() or str(it.get("slug", "")).strip()
+            title = str(skill_obj.get("title", "")).strip() or str(it.get("title", "")).strip()
+            purchased_at = str(it.get("purchased_at", "")).strip() or str(it.get("paid_at", "")).strip()
+            rows.append([f"{namespace}/{slug}".strip("/"), title, purchased_at])
+        _print_table(rows)
         return 0
 
     if args.subcmd == "sales":
@@ -2210,8 +2281,13 @@ def _format_http_error(err: SkilldockHTTPError) -> str:
         base = "HTTP 404 Not Found. Resource does not exist or is not visible to your account."
     elif err.status_code == 409 and code == "price_mode_incompatible":
         base = (
-            "HTTP 409 Conflict. Checkout is not available yet for this pricing mode "
-            "(for example, TON-priced skills)."
+            "HTTP 409 Conflict. Price mode is incompatible with selected payment provider "
+            "(TON buy currently requires pricing_mode=fixed_ton)."
+        )
+    elif err.status_code == 409 and code == "payment_provider_unsupported":
+        base = (
+            "HTTP 409 Conflict. Payment provider is unsupported "
+            "(current backend supports payment_provider=ton only)."
         )
     else:
         base = f"HTTP {err.status_code}"

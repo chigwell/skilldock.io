@@ -295,7 +295,10 @@ class TestSkillsSearch(unittest.TestCase):
         self.assertIn("can_view_full_content: false", out)
         self.assertIn("is_buyer: true", out)
         self.assertIn("is_for_sale: true", out)
+        self.assertIn("pricing_mode:", out)
         self.assertIn("price_usd: 12.00", out)
+        self.assertIn("price_ton:", out)
+        self.assertIn("price_ton_nano:", out)
 
     def test_release_prints_author_fields_when_present(self) -> None:
         args = build_parser().parse_args(["skills", "release", "acme/my-skill", "0.1.0"])
@@ -689,7 +692,7 @@ class TestHttpErrorFormatting(unittest.TestCase):
             '{"code":"price_mode_incompatible","message":"fixed_ton buy is not supported yet"}',
         )
         msg = _format_http_error(err)
-        self.assertIn("HTTP 409 Conflict. Checkout is not available yet for this pricing mode", msg)
+        self.assertIn("HTTP 409 Conflict. Price mode is incompatible with selected payment provider", msg)
         self.assertIn("fixed_ton buy is not supported yet", msg)
 
     def test_format_409_price_mode_incompatible_nested_error_code(self) -> None:
@@ -698,8 +701,17 @@ class TestHttpErrorFormatting(unittest.TestCase):
             '{"error":{"code":"price_mode_incompatible","detail":"TON checkout coming next"}}',
         )
         msg = _format_http_error(err)
-        self.assertIn("HTTP 409 Conflict. Checkout is not available yet for this pricing mode", msg)
+        self.assertIn("HTTP 409 Conflict. Price mode is incompatible with selected payment provider", msg)
         self.assertIn("TON checkout coming next", msg)
+
+    def test_format_409_payment_provider_unsupported(self) -> None:
+        err = SkilldockHTTPError(
+            409,
+            '{"error":{"code":"payment_provider_unsupported","message":"Only TON is supported"}}',
+        )
+        msg = _format_http_error(err)
+        self.assertIn("HTTP 409 Conflict. Payment provider is unsupported", msg)
+        self.assertIn("Only TON is supported", msg)
 
 
 class TestRuntimeClient(unittest.TestCase):
@@ -819,7 +831,10 @@ class TestSkillsCommerce(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client.request.call_args.kwargs["method"], "POST")
         self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/skills/acme/my-skill/prices")
-        self.assertEqual(mock_client.request.call_args.kwargs["json_body"], {"price_usd": "12.00"})
+        self.assertEqual(
+            mock_client.request.call_args.kwargs["json_body"],
+            {"pricing_mode": "fixed_usd", "price_usd": "12.00"},
+        )
 
     def test_set_price_fixed_usd_explicit_mode_calls_endpoint(self) -> None:
         args = build_parser().parse_args(
@@ -959,8 +974,34 @@ class TestSkillsCommerce(unittest.TestCase):
             rc = cmd_skills(args)
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client.request.call_args_list[0].kwargs["path"], "/v1/skills/acme/my-skill/buy")
+        self.assertEqual(mock_client.request.call_args_list[0].kwargs["json_body"], {"payment_provider": "ton"})
         self.assertEqual(mock_client.request.call_args_list[1].kwargs["path"], "/v1/skill-purchases/invoices/inv_1")
         self.assertIn("status: paid", stdout.getvalue())
+
+    def test_buy_accepts_referral_and_payment_provider(self) -> None:
+        args = build_parser().parse_args(
+            ["skills", "buy", "acme/my-skill", "--payment-provider", "ton", "--referral-code", "a"]
+        )
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"created": True, "invoice": {"id": "inv_1", "status": "pending"}}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            mock_client.request.call_args.kwargs["json_body"],
+            {"payment_provider": "ton", "referral_code": "a"},
+        )
 
     def test_invoice_calls_invoice_endpoint(self) -> None:
         args = build_parser().parse_args(["skills", "invoice", "inv_1"])
@@ -982,6 +1023,39 @@ class TestSkillsCommerce(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
         self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/skill-purchases/invoices/inv_1")
+
+    def test_bought_calls_bought_skills_endpoint(self) -> None:
+        args = build_parser().parse_args(["skills", "bought", "--page", "1", "--per-page", "20"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {
+            "page": 1,
+            "per_page": 20,
+            "has_more": False,
+            "items": [
+                {
+                    "skill": {"namespace": "acme", "slug": "my-skill", "title": "My Skill"},
+                    "purchased_at": "2026-02-27T10:00:00.000Z",
+                }
+            ],
+        }
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/bought-skills")
+        self.assertEqual(mock_client.request.call_args.kwargs["params"], {"page": 1, "per_page": 20})
+        self.assertIn("acme/my-skill", stdout.getvalue())
 
     def test_sales_with_skill_calls_skill_sales_endpoint(self) -> None:
         args = build_parser().parse_args(["skills", "sales", "--skill", "acme/my-skill"])
