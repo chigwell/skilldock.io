@@ -90,23 +90,45 @@ Browse release history page-by-page:
 skilldock skills releases acme/my-skill --page 1 --per-page 10
 ```
 
-Commerce sell/buy flow (TON):
+Commerce sell/buy flow (TON + Stripe):
 
 ```bash
 # 1) Seller setup
+# Stripe Connect Express onboarding (first run)
+skilldock skills stripe-connect-start --country US
+# Or resume/check later
+skilldock skills stripe-connect-status
+
+# Payout methods
 skilldock skills set-ton-wallet --ton-wallet-address UQ...
+skilldock skills set-stripe-payout --stripe-account-id acct_1ABCDEF... --stripe-account-label "Stripe Express"
+skilldock skills payout-methods
+
+# Mark the skill as sellable
 skilldock skills set-commerce acme/my-skill --is-for-sale true --visibility private --selling-description-md "What buyer sees"
+
+# Dual-rail pricing (set either or both)
+skilldock skills set-price acme/my-skill --pricing-mode fixed_usd --price-usd 29.00
 skilldock skills set-price acme/my-skill --pricing-mode fixed_ton --price-ton 2.750000000
 
-# 2) Buyer invoice create/reuse (TON provider required by current backend)
+# 2) Buyer invoice create/reuse
+skilldock skills buy acme/my-skill --payment-provider stripe
 skilldock skills buy acme/my-skill --payment-provider ton --referral-code a
+skilldock skills buy acme/my-skill
+# If omitted, the backend can choose the default payment rail.
 
 # 3) Poll invoice until paid/expired/cancelled
-skilldock skills buy acme/my-skill --payment-provider ton --poll
+skilldock skills buy acme/my-skill --payment-provider stripe --poll
 # or check a known invoice id
 skilldock skills invoice <invoice_id>
 
-# 4) Confirm inventory
+# 4) Seller balances / payouts
+skilldock skills balance
+skilldock skills balance-transactions --page 1 --per-page 20
+skilldock skills request-payout --amount-usd 25.00 --payout-method-kind stripe
+skilldock skills payout-requests --page 1 --per-page 20
+
+# 5) Confirm inventory
 skilldock skills bought --page 1 --per-page 20
 ```
 

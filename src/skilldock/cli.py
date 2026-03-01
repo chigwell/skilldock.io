@@ -122,6 +122,17 @@ def _validate_positive_decimal_string(value: str, *, field: str, pattern: re.Pat
     return s
 
 
+def _normalize_country_code(value: str | None) -> str | None:
+    if value is None:
+        return None
+    code = value.strip().upper()
+    if not code:
+        return None
+    if not re.fullmatch(r"[A-Z]{2}", code):
+        raise SkilldockError("--country must be a 2-letter ISO country code, e.g. US.")
+    return code
+
+
 def _merge_cfg(base: Config, args: argparse.Namespace) -> Config:
     # Env overrides config; CLI overrides both.
     openapi_url = getattr(args, "openapi_url", None) or os.getenv("SKILLDOCK_OPENAPI_URL") or base.openapi_url
@@ -357,6 +368,74 @@ def _extract_author_summary(obj: Any) -> tuple[str, str, str]:
         str(display_name).strip() if display_name is not None else "",
         str(google_picture).strip() if google_picture is not None else "",
     )
+
+
+def _print_payout_method(method: dict[str, Any]) -> None:
+    print(f"id: {str(method.get('id', ''))}")
+    print(f"kind: {str(method.get('kind', ''))}")
+    print(f"status: {str(method.get('status', ''))}")
+    print(f"ton_wallet_address: {str(method.get('ton_wallet_address', ''))}")
+    print(f"stripe_account_id: {str(method.get('stripe_account_id', ''))}")
+    print(f"stripe_account_label: {str(method.get('stripe_account_label', ''))}")
+    print(f"created_at: {str(method.get('created_at', ''))}")
+    print(f"updated_at: {str(method.get('updated_at', ''))}")
+
+
+def _print_stripe_connect_account(account: dict[str, Any] | None) -> None:
+    if not isinstance(account, dict):
+        print("account_linked: false")
+        return
+    print("account_linked: true")
+    print(f"stripe_account_id: {str(account.get('stripe_account_id', ''))}")
+    print(f"account_status: {str(account.get('account_status', ''))}")
+    print(f"country: {str(account.get('country', ''))}")
+    print(f"default_currency: {str(account.get('default_currency', ''))}")
+    print(f"details_submitted: {'true' if bool(account.get('details_submitted')) else 'false'}")
+    print(f"charges_enabled: {'true' if bool(account.get('charges_enabled')) else 'false'}")
+    print(f"payouts_enabled: {'true' if bool(account.get('payouts_enabled')) else 'false'}")
+    print(f"onboarding_complete: {'true' if bool(account.get('onboarding_complete')) else 'false'}")
+    requirements_due = account.get("requirements_due")
+    if isinstance(requirements_due, list):
+        print(f"requirements_due: {','.join(str(x) for x in requirements_due)}")
+    else:
+        print("requirements_due: ")
+    requirements_errors = account.get("requirements_errors")
+    if isinstance(requirements_errors, list):
+        print(f"requirements_errors: {json.dumps(requirements_errors, separators=(',', ':'))}")
+    else:
+        print("requirements_errors: ")
+    print(f"requirements_disabled_reason: {str(account.get('requirements_disabled_reason', ''))}")
+    print(f"created_at: {str(account.get('created_at', ''))}")
+    print(f"updated_at: {str(account.get('updated_at', ''))}")
+    print(f"last_synced_at: {str(account.get('last_synced_at', ''))}")
+
+
+def _print_invoice_summary(invoice: dict[str, Any], *, created: Any | None = None) -> None:
+    if created is not None:
+        print(f"created: {'true' if bool(created) else 'false'}")
+    print(f"invoice_id: {str(invoice.get('id', ''))}")
+    print(f"status: {str(invoice.get('status', ''))}")
+    print(f"created_at: {str(invoice.get('created_at', ''))}")
+    print(f"expires_at: {str(invoice.get('expires_at', ''))}")
+    print(f"paid_at: {str(invoice.get('paid_at', ''))}")
+    print(f"pay_to_address: {str(invoice.get('pay_to_address', ''))}")
+    print(f"memo: {str(invoice.get('memo', ''))}")
+    print(f"payment_provider: {str(invoice.get('payment_provider', ''))}")
+    print(f"pricing_mode_snapshot: {str(invoice.get('pricing_mode_snapshot', ''))}")
+    print(f"amount_ton: {str(invoice.get('amount_ton', ''))}")
+    print(f"amount_ton_nano: {str(invoice.get('amount_ton_nano', ''))}")
+    print(f"amount_usd: {str(invoice.get('amount_usd', ''))}")
+    print(f"amount_usd_cents: {str(invoice.get('amount_usd_cents', ''))}")
+    print(f"tx_hash: {str(invoice.get('tx_hash', ''))}")
+    print(f"stripe_checkout_session_id: {str(invoice.get('stripe_checkout_session_id', ''))}")
+    print(f"stripe_checkout_url: {str(invoice.get('stripe_checkout_url', ''))}")
+    print(f"stripe_payment_intent_id: {str(invoice.get('stripe_payment_intent_id', ''))}")
+    print(f"stripe_payment_status: {str(invoice.get('stripe_payment_status', ''))}")
+    print(
+        f"amount_usd_is_reference_only: "
+        f"{'true' if bool(invoice.get('amount_usd_is_reference_only')) else 'false'}"
+    )
+    print(f"access_granted: {'true' if bool(invoice.get('access_granted')) else 'false'}")
 
 
 def _aligned_openapi_url_for_save(
@@ -688,6 +767,34 @@ def build_parser() -> argparse.ArgumentParser:
     skills_set_ton_wallet.add_argument("--ton-wallet-address", required=True)
     skills_set_ton_wallet.add_argument("--json", action="store_true", help="Output JSON")
 
+    skills_stripe_connect_start = skills_sub.add_parser(
+        "stripe-connect-start",
+        help="Create or resume Stripe Connect Express onboarding for the current user",
+    )
+    _add_runtime_overrides(skills_stripe_connect_start)
+    skills_stripe_connect_start.add_argument("--country", help='2-letter country code for first-time setup, e.g. "US"')
+    skills_stripe_connect_start.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_stripe_connect_status = skills_sub.add_parser(
+        "stripe-connect-status",
+        help="Fetch the current Stripe Connect seller onboarding status",
+    )
+    _add_runtime_overrides(skills_stripe_connect_status)
+    skills_stripe_connect_status.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_payout_methods = skills_sub.add_parser("payout-methods", help="List payout methods for the current user")
+    _add_runtime_overrides(skills_payout_methods)
+    skills_payout_methods.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_set_stripe_payout = skills_sub.add_parser(
+        "set-stripe-payout",
+        help="Activate Stripe as the payout method after Stripe Connect onboarding is complete",
+    )
+    _add_runtime_overrides(skills_set_stripe_payout)
+    skills_set_stripe_payout.add_argument("--stripe-account-id", required=True)
+    skills_set_stripe_payout.add_argument("--stripe-account-label", default="Stripe Express")
+    skills_set_stripe_payout.add_argument("--json", action="store_true", help="Output JSON")
+
     skills_set_price = skills_sub.add_parser("set-price", help="Set active sale price for a skill")
     _add_runtime_overrides(skills_set_price)
     skills_set_price.add_argument("skill", help="Skill identifier in form namespace/slug")
@@ -708,7 +815,7 @@ def build_parser() -> argparse.ArgumentParser:
     skills_buy = skills_sub.add_parser("buy", help="Create/reuse invoice and optionally poll until paid, expired, or cancelled")
     _add_runtime_overrides(skills_buy)
     skills_buy.add_argument("skill", help="Skill identifier in form namespace/slug")
-    skills_buy.add_argument("--payment-provider", default="ton", help='Payment provider (default: "ton")')
+    skills_buy.add_argument("--payment-provider", choices=("ton", "stripe"), help='Payment provider ("ton" or "stripe")')
     skills_buy.add_argument("--referral-code", help="Optional referral code")
     skills_buy.add_argument("--poll", action="store_true", help="Poll invoice status until paid, expired, or cancelled")
     skills_buy.add_argument("--poll-interval-s", type=float, default=3.0, help="Polling interval seconds (default: 3)")
@@ -719,6 +826,31 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_overrides(skills_invoice)
     skills_invoice.add_argument("invoice_id")
     skills_invoice.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_balance = skills_sub.add_parser("balance", help="Get the current seller/referrer balance snapshot")
+    _add_runtime_overrides(skills_balance)
+    skills_balance.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_balance_transactions = skills_sub.add_parser(
+        "balance-transactions",
+        help="List balance ledger transactions for the current user",
+    )
+    _add_runtime_overrides(skills_balance_transactions)
+    skills_balance_transactions.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
+    skills_balance_transactions.add_argument("--per-page", type=int, default=20, help="Page size (default: 20)")
+    skills_balance_transactions.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_request_payout = skills_sub.add_parser("request-payout", help="Create a payout request")
+    _add_runtime_overrides(skills_request_payout)
+    skills_request_payout.add_argument("--amount-usd", required=True, help='USD amount, e.g. "25.00"')
+    skills_request_payout.add_argument("--payout-method-kind", choices=("stripe", "ton"), required=True)
+    skills_request_payout.add_argument("--json", action="store_true", help="Output JSON")
+
+    skills_payout_requests = skills_sub.add_parser("payout-requests", help="List payout requests for the current user")
+    _add_runtime_overrides(skills_payout_requests)
+    skills_payout_requests.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
+    skills_payout_requests.add_argument("--per-page", type=int, default=20, help="Page size (default: 20)")
+    skills_payout_requests.add_argument("--json", action="store_true", help="Output JSON")
 
     skills_sales = skills_sub.add_parser("sales", help="List paid sales for current user or one authored skill")
     _add_runtime_overrides(skills_sales)
@@ -1578,10 +1710,142 @@ def cmd_skills(args: argparse.Namespace) -> int:
             print(json.dumps(data, indent=2, sort_keys=True))
             return 0
         method = data.get("method") if isinstance(data, dict) and isinstance(data.get("method"), dict) else {}
-        print(f"id: {str(method.get('id', ''))}")
-        print(f"kind: {str(method.get('kind', ''))}")
-        print(f"ton_wallet_address: {str(method.get('ton_wallet_address', ''))}")
-        print(f"status: {str(method.get('status', ''))}")
+        _print_payout_method(method)
+        return 0
+
+    if args.subcmd == "stripe-connect-start":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+        country = _normalize_country_code(getattr(args, "country", None))
+        body = {"country": country} if country else None
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="POST",
+                path="/v1/me/stripe/connect/start",
+                json_body=body,
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        account = data.get("account") if isinstance(data, dict) and isinstance(data.get("account"), dict) else None
+        _print_stripe_connect_account(account)
+        print(f"onboarding_url: {str(data.get('onboarding_url', '')) if isinstance(data, dict) else ''}")
+        return 0
+
+    if args.subcmd == "stripe-connect-status":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="GET",
+                path="/v1/me/stripe/connect/status",
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        account = data.get("account") if isinstance(data, dict) and isinstance(data.get("account"), dict) else None
+        _print_stripe_connect_account(account)
+        return 0
+
+    if args.subcmd == "payout-methods":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="GET",
+                path="/v1/me/payout-methods",
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        items = data.get("items") if isinstance(data, dict) and isinstance(data.get("items"), list) else []
+        rows: list[list[str]] = [["ID", "KIND", "STATUS", "STRIPE_ACCOUNT", "TON_WALLET", "LABEL", "UPDATED_AT"]]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                [
+                    str(item.get("id", "")),
+                    str(item.get("kind", "")),
+                    str(item.get("status", "")),
+                    str(item.get("stripe_account_id", "")),
+                    str(item.get("ton_wallet_address", "")),
+                    str(item.get("stripe_account_label", "")),
+                    str(item.get("updated_at", "")),
+                ]
+            )
+        _print_table(rows)
+        return 0
+
+    if args.subcmd == "set-stripe-payout":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="POST",
+                path="/v1/me/payout-methods/stripe",
+                json_body={
+                    "stripe_account_id": args.stripe_account_id,
+                    "stripe_account_label": args.stripe_account_label,
+                },
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        method = data.get("method") if isinstance(data, dict) and isinstance(data.get("method"), dict) else {}
+        _print_payout_method(method)
         return 0
 
     if args.subcmd == "set-price":
@@ -1701,10 +1965,12 @@ def cmd_skills(args: argparse.Namespace) -> int:
             raise SkilldockError("Missing token. Run `skilldock auth login` first.")
         _require_fresh_token(cfg.token)
         ref = parse_skill_ref(args.skill)
-        payment_provider = str(getattr(args, "payment_provider", "ton")).strip() or "ton"
+        payment_provider = getattr(args, "payment_provider", None)
         referral_code_raw = getattr(args, "referral_code", None)
         referral_code = str(referral_code_raw).strip() if referral_code_raw is not None else ""
-        body: dict[str, Any] = {"payment_provider": payment_provider}
+        body: dict[str, Any] = {}
+        if payment_provider:
+            body["payment_provider"] = payment_provider
         if referral_code:
             body["referral_code"] = referral_code
 
@@ -1713,7 +1979,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
             resp = client.request(
                 method="POST",
                 path=f"/v1/skills/{quote(ref.namespace, safe='')}/{quote(ref.slug, safe='')}/buy",
-                json_body=body,
+                json_body=body or None,
                 auth=True,
             )
             data = _unwrap_success_envelope(resp.json())
@@ -1744,22 +2010,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
             print(json.dumps(data, indent=2, sort_keys=True))
             return 0
         invoice = data.get("invoice") if isinstance(data, dict) and isinstance(data.get("invoice"), dict) else {}
-        print(f"created: {'true' if bool(data.get('created')) else 'false'}")
-        print(f"invoice_id: {str(invoice.get('id', ''))}")
-        print(f"status: {str(invoice.get('status', ''))}")
-        print(f"pay_to_address: {str(invoice.get('pay_to_address', ''))}")
-        print(f"memo: {str(invoice.get('memo', ''))}")
-        print(f"payment_provider: {str(invoice.get('payment_provider', ''))}")
-        print(f"pricing_mode_snapshot: {str(invoice.get('pricing_mode_snapshot', ''))}")
-        print(f"amount_ton: {str(invoice.get('amount_ton', ''))}")
-        print(f"amount_ton_nano: {str(invoice.get('amount_ton_nano', ''))}")
-        print(f"amount_usd: {str(invoice.get('amount_usd', ''))}")
-        print(
-            f"amount_usd_is_reference_only: "
-            f"{'true' if bool(invoice.get('amount_usd_is_reference_only')) else 'false'}"
-        )
-        print(f"expires_at: {str(invoice.get('expires_at', ''))}")
-        print(f"access_granted: {'true' if bool(invoice.get('access_granted')) else 'false'}")
+        _print_invoice_summary(invoice, created=data.get("created"))
         return 0
 
     if args.subcmd == "invoice":
@@ -1787,20 +2038,184 @@ def cmd_skills(args: argparse.Namespace) -> int:
             print(json.dumps(data, indent=2, sort_keys=True))
             return 0
         invoice = data.get("invoice") if isinstance(data, dict) and isinstance(data.get("invoice"), dict) else {}
-        print(f"invoice_id: {str(invoice.get('id', ''))}")
-        print(f"status: {str(invoice.get('status', ''))}")
-        print(f"payment_provider: {str(invoice.get('payment_provider', ''))}")
-        print(f"pricing_mode_snapshot: {str(invoice.get('pricing_mode_snapshot', ''))}")
-        print(f"amount_ton: {str(invoice.get('amount_ton', ''))}")
-        print(f"amount_ton_nano: {str(invoice.get('amount_ton_nano', ''))}")
-        print(f"amount_usd: {str(invoice.get('amount_usd', ''))}")
-        print(
-            f"amount_usd_is_reference_only: "
-            f"{'true' if bool(invoice.get('amount_usd_is_reference_only')) else 'false'}"
+        _print_invoice_summary(invoice)
+        return 0
+
+    if args.subcmd == "balance":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="GET",
+                path="/v1/me/balance",
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        balance = data.get("balance") if isinstance(data, dict) and isinstance(data.get("balance"), dict) else {}
+        print(f"pending_usd: {str(balance.get('pending_usd', ''))}")
+        print(f"available_usd: {str(balance.get('available_usd', ''))}")
+        print(f"lifetime_earned_usd: {str(balance.get('lifetime_earned_usd', ''))}")
+        print(f"lifetime_paid_out_usd: {str(balance.get('lifetime_paid_out_usd', ''))}")
+        print(f"updated_at: {str(balance.get('updated_at', ''))}")
+        return 0
+
+    if args.subcmd == "balance-transactions":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+        if args.page < 1:
+            raise SkilldockError("--page must be >= 1.")
+        if args.per_page < 1:
+            raise SkilldockError("--per-page must be >= 1.")
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="GET",
+                path="/v1/me/balance/transactions",
+                params={"page": args.page, "per_page": args.per_page},
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        page = data.get("page") if isinstance(data, dict) else None
+        per_page = data.get("per_page") if isinstance(data, dict) else None
+        has_more = bool(data.get("has_more")) if isinstance(data, dict) else False
+        print(f"page: {page if isinstance(page, int) else args.page}")
+        print(f"per_page: {per_page if isinstance(per_page, int) else args.per_page}")
+        print(f"has_more: {'true' if has_more else 'false'}")
+        items = data.get("items") if isinstance(data, dict) and isinstance(data.get("items"), list) else []
+        rows: list[list[str]] = [["ID", "TYPE", "STATUS", "AMOUNT_USD", "CREATED_AT"]]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                [
+                    str(item.get("id", "")),
+                    str(item.get("type", item.get("kind", ""))),
+                    str(item.get("status", "")),
+                    str(item.get("amount_usd", "")),
+                    str(item.get("created_at", item.get("occurred_at", ""))),
+                ]
+            )
+        _print_table(rows)
+        return 0
+
+    if args.subcmd == "request-payout":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+        amount_usd = _validate_positive_decimal_string(
+            args.amount_usd,
+            field="amount_usd",
+            pattern=_USD_AMOUNT_RE,
+            scale_label="2 decimal places",
         )
-        print(f"paid_at: {str(invoice.get('paid_at', ''))}")
-        print(f"tx_hash: {str(invoice.get('tx_hash', ''))}")
-        print(f"access_granted: {'true' if bool(invoice.get('access_granted')) else 'false'}")
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="POST",
+                path="/v1/me/payout-requests",
+                json_body={"amount_usd": amount_usd, "payout_method_kind": args.payout_method_kind},
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        payout_request = (
+            data.get("payout_request") if isinstance(data, dict) and isinstance(data.get("payout_request"), dict) else {}
+        )
+        print(f"id: {str(payout_request.get('id', ''))}")
+        print(f"status: {str(payout_request.get('status', ''))}")
+        print(f"amount_usd: {str(payout_request.get('amount_usd', ''))}")
+        print(f"payout_method_kind: {str(payout_request.get('payout_method_kind', ''))}")
+        print(f"requested_at: {str(payout_request.get('requested_at', ''))}")
+        return 0
+
+    if args.subcmd == "payout-requests":
+        cfg_file = load_config()
+        cfg = _merge_cfg(cfg_file, args)
+        base_url = (cfg.base_url or _origin_from_url(cfg.openapi_url) or "").rstrip("/")
+        if not base_url:
+            raise SkilldockError("Missing base_url. Set it via --base-url or SKILLDOCK_BASE_URL or config.")
+        if not cfg.token:
+            raise SkilldockError("Missing token. Run `skilldock auth login` first.")
+        _require_fresh_token(cfg.token)
+        if args.page < 1:
+            raise SkilldockError("--page must be >= 1.")
+        if args.per_page < 1:
+            raise SkilldockError("--per-page must be >= 1.")
+
+        client = SkilldockClient(openapi_url=cfg.openapi_url, base_url=base_url, token=cfg.token, timeout_s=cfg.timeout_s)
+        try:
+            resp = client.request(
+                method="GET",
+                path="/v1/me/payout-requests",
+                params={"page": args.page, "per_page": args.per_page},
+                auth=True,
+            )
+            data = _unwrap_success_envelope(resp.json())
+        finally:
+            client.close()
+
+        if args.json:
+            print(json.dumps(data, indent=2, sort_keys=True))
+            return 0
+        page = data.get("page") if isinstance(data, dict) else None
+        per_page = data.get("per_page") if isinstance(data, dict) else None
+        has_more = bool(data.get("has_more")) if isinstance(data, dict) else False
+        print(f"page: {page if isinstance(page, int) else args.page}")
+        print(f"per_page: {per_page if isinstance(per_page, int) else args.per_page}")
+        print(f"has_more: {'true' if has_more else 'false'}")
+        items = data.get("items") if isinstance(data, dict) and isinstance(data.get("items"), list) else []
+        rows: list[list[str]] = [["ID", "STATUS", "AMOUNT_USD", "METHOD", "REQUESTED_AT"]]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                [
+                    str(item.get("id", "")),
+                    str(item.get("status", "")),
+                    str(item.get("amount_usd", "")),
+                    str(item.get("payout_method_kind", "")),
+                    str(item.get("requested_at", "")),
+                ]
+            )
+        _print_table(rows)
         return 0
 
     if args.subcmd == "bought":
@@ -2459,15 +2874,9 @@ def _format_http_error(err: SkilldockHTTPError) -> str:
     elif err.status_code == 410:
         base = "HTTP 410 Gone. Resource has been deleted or is no longer available."
     elif err.status_code == 409 and code == "price_mode_incompatible":
-        base = (
-            "HTTP 409 Conflict. Price mode is incompatible with selected payment provider "
-            "(TON buy currently requires pricing_mode=fixed_ton)."
-        )
+        base = "HTTP 409 Conflict. Price mode is incompatible with selected payment provider."
     elif err.status_code == 409 and code == "payment_provider_unsupported":
-        base = (
-            "HTTP 409 Conflict. Payment provider is unsupported "
-            "(current backend supports payment_provider=ton only)."
-        )
+        base = "HTTP 409 Conflict. Payment provider is unsupported."
     else:
         base = f"HTTP {err.status_code}"
     if detail:

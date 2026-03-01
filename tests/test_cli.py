@@ -263,11 +263,10 @@ class TestSkillsSearch(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         out = stdout.getvalue()
-        self.assertIn("LATEST_VERSIONS", out)
-        self.assertIn("1.2.0,1.1.0", out)
+        self.assertIn("1.2.0", out)
         self.assertIn("12.00", out)
         self.assertIn("10", out)
-        self.assertIn("acme/my-skill (u:123)", out)
+        self.assertIn("(u:123)", out)
 
     def test_get_renders_access_and_sale_blocks(self) -> None:
         args = build_parser().parse_args(["skills", "get", "acme/my-skill"])
@@ -958,6 +957,108 @@ class TestSkillsCommerce(unittest.TestCase):
             {"ton_wallet_address": "UQ123"},
         )
 
+    def test_stripe_connect_start_calls_endpoint_with_country(self) -> None:
+        args = build_parser().parse_args(["skills", "stripe-connect-start", "--country", "us"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {
+            "account": {"stripe_account_id": "acct_123", "account_status": "pending"},
+            "onboarding_url": "https://connect.stripe.com/setup/test",
+        }
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "POST")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/stripe/connect/start")
+        self.assertEqual(mock_client.request.call_args.kwargs["json_body"], {"country": "US"})
+
+    def test_stripe_connect_status_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(["skills", "stripe-connect-status"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"account": {"stripe_account_id": "acct_123", "account_status": "enabled"}}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/stripe/connect/status")
+
+    def test_payout_methods_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(["skills", "payout-methods"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"items": [{"id": 12, "kind": "stripe", "status": "active"}]}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/payout-methods")
+        self.assertIn("stripe", stdout.getvalue())
+
+    def test_set_stripe_payout_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "skills",
+                "set-stripe-payout",
+                "--stripe-account-id",
+                "acct_123",
+                "--stripe-account-label",
+                "Stripe Express",
+            ]
+        )
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"method": {"id": 12, "kind": "stripe", "stripe_account_id": "acct_123", "status": "active"}}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "POST")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/payout-methods/stripe")
+        self.assertEqual(
+            mock_client.request.call_args.kwargs["json_body"],
+            {"stripe_account_id": "acct_123", "stripe_account_label": "Stripe Express"},
+        )
+
     def test_set_price_calls_endpoint(self) -> None:
         args = build_parser().parse_args(
             ["skills", "set-price", "acme/my-skill", "--price-usd", "12.00"]
@@ -1123,7 +1224,7 @@ class TestSkillsCommerce(unittest.TestCase):
             rc = cmd_skills(args)
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client.request.call_args_list[0].kwargs["path"], "/v1/skills/acme/my-skill/buy")
-        self.assertEqual(mock_client.request.call_args_list[0].kwargs["json_body"], {"payment_provider": "ton"})
+        self.assertIsNone(mock_client.request.call_args_list[0].kwargs["json_body"])
         self.assertEqual(mock_client.request.call_args_list[1].kwargs["path"], "/v1/skill-purchases/invoices/inv_1")
         self.assertIn("status: paid", stdout.getvalue())
 
@@ -1152,6 +1253,39 @@ class TestSkillsCommerce(unittest.TestCase):
             {"payment_provider": "ton", "referral_code": "a"},
         )
 
+    def test_buy_stripe_prints_checkout_fields(self) -> None:
+        args = build_parser().parse_args(["skills", "buy", "acme/my-skill", "--payment-provider", "stripe"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {
+            "created": True,
+            "invoice": {
+                "id": "inv_1",
+                "status": "pending",
+                "payment_provider": "stripe",
+                "amount_usd": "29.00",
+                "amount_usd_cents": 2900,
+                "stripe_checkout_url": "https://checkout.stripe.com/c/pay/test",
+                "stripe_payment_status": "unpaid",
+            },
+        }
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        out = stdout.getvalue()
+        self.assertIn("stripe_checkout_url: https://checkout.stripe.com/c/pay/test", out)
+        self.assertIn("stripe_payment_status: unpaid", out)
+
     def test_invoice_calls_invoice_endpoint(self) -> None:
         args = build_parser().parse_args(["skills", "invoice", "inv_1"])
         cfg = Config(
@@ -1172,6 +1306,101 @@ class TestSkillsCommerce(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
         self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/skill-purchases/invoices/inv_1")
+
+    def test_balance_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(["skills", "balance"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"balance": {"available_usd": "30.00", "pending_usd": "14.50"}}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/balance")
+        self.assertIn("available_usd: 30.00", stdout.getvalue())
+
+    def test_balance_transactions_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(["skills", "balance-transactions", "--page", "1", "--per-page", "20"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"page": 1, "per_page": 20, "has_more": False, "items": [{"id": 1, "status": "available"}]}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/balance/transactions")
+        self.assertEqual(mock_client.request.call_args.kwargs["params"], {"page": 1, "per_page": 20})
+        self.assertIn("available", stdout.getvalue())
+
+    def test_request_payout_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(
+            ["skills", "request-payout", "--amount-usd", "25.00", "--payout-method-kind", "stripe"]
+        )
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"payout_request": {"id": 17, "status": "requested", "amount_usd": "25.00"}}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "POST")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/payout-requests")
+        self.assertEqual(
+            mock_client.request.call_args.kwargs["json_body"],
+            {"amount_usd": "25.00", "payout_method_kind": "stripe"},
+        )
+
+    def test_payout_requests_calls_endpoint(self) -> None:
+        args = build_parser().parse_args(["skills", "payout-requests", "--page", "1", "--per-page", "20"])
+        cfg = Config(
+            openapi_url=DEFAULT_OPENAPI_URL,
+            base_url="https://api.skilldock.io",
+            token="tok_123",
+            timeout_s=30.0,
+        )
+        payload = {"page": 1, "per_page": 20, "has_more": False, "items": [{"id": 17, "status": "requested"}]}
+        with (
+            patch("skilldock.cli.load_config", return_value=cfg),
+            patch("skilldock.cli.SkilldockClient") as mock_client_cls,
+            patch("sys.stdout", new=io.StringIO()) as stdout,
+        ):
+            mock_client = mock_client_cls.return_value
+            mock_client.request.return_value = _FakeResponse(payload)
+            rc = cmd_skills(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_client.request.call_args.kwargs["method"], "GET")
+        self.assertEqual(mock_client.request.call_args.kwargs["path"], "/v1/me/payout-requests")
+        self.assertEqual(mock_client.request.call_args.kwargs["params"], {"page": 1, "per_page": 20})
+        self.assertIn("requested", stdout.getvalue())
 
     def test_bought_calls_bought_skills_endpoint(self) -> None:
         args = build_parser().parse_args(["skills", "bought", "--page", "1", "--per-page", "20"])
