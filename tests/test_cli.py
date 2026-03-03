@@ -814,6 +814,28 @@ class TestHelpCommand(unittest.TestCase):
         self.assertIn("usage: skilldock skills", out)
         self.assertIn("search              Search skills", out)
 
+    def test_invalid_top_level_command_suggests_closest_match(self) -> None:
+        with patch("sys.stderr", new=io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as ctx:
+                main(["skils"])
+
+        self.assertEqual(ctx.exception.code, 2)
+        err = stderr.getvalue()
+        self.assertIn("invalid choice: 'skils'", err)
+        self.assertIn("Did you mean 'skills'?", err)
+        self.assertIn("Use the valid command: skills", err)
+
+    def test_invalid_nested_command_suggests_closest_match(self) -> None:
+        with patch("sys.stderr", new=io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as ctx:
+                main(["auth", "logn"])
+
+        self.assertEqual(ctx.exception.code, 2)
+        err = stderr.getvalue()
+        self.assertIn("invalid choice: 'logn'", err)
+        self.assertIn("Did you mean 'login'?", err)
+        self.assertIn("Use the valid command: login", err)
+
 
 class TestHttpErrorFormatting(unittest.TestCase):
     def test_format_402_purchase_required(self) -> None:

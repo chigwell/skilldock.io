@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import builtins
+import difflib
 import json
 import mimetypes
 import os
@@ -35,6 +36,7 @@ from .skill_package import SkillPackageError, package_skill
 
 _USD_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,2})?$")
 _TON_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,9})?$")
+_INVALID_CHOICE_RE = re.compile(r"invalid choice: '([^']+)' \(choose from (.+)\)")
 
 
 def _console_print(*values: Any, sep: str = " ", end: str = "\n", file: Any | None = None, flush: bool = False) -> None:
@@ -57,6 +59,33 @@ def _console_print(*values: Any, sep: str = " ", end: str = "\n", file: Any | No
 
 # Route all CLI text output through Rich when available, preserving legacy print semantics.
 print = _console_print  # type: ignore[assignment]
+
+
+class SkilldockArgumentParser(argparse.ArgumentParser):
+    def add_subparsers(self, **kwargs: Any) -> Any:
+        kwargs.setdefault("parser_class", type(self))
+        return super().add_subparsers(**kwargs)
+
+    def error(self, message: str) -> None:
+        suggestion = self._build_command_suggestion(message)
+        if suggestion:
+            message = f"{message}\n{suggestion}"
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}: error: {message}\n")
+
+    def _build_command_suggestion(self, message: str) -> str | None:
+        match = _INVALID_CHOICE_RE.search(message)
+        if not match:
+            return None
+        invalid, raw_choices = match.groups()
+        choices = re.findall(r"'([^']+)'", raw_choices)
+        if not choices:
+            return None
+        suggestion = difflib.get_close_matches(invalid, choices, n=1, cutoff=0.45)
+        if not suggestion:
+            return None
+        best = suggestion[0]
+        return f"Did you mean '{best}'? Use the valid command: {best}"
 
 
 def _jsonish(v: str) -> Any:
@@ -601,8 +630,8 @@ def _bootstrap_personal_token_after_oauth(
         client.close()
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+def build_parser() -> SkilldockArgumentParser:
+    p = SkilldockArgumentParser(
         prog="skilldock",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="SkillDock API client (OpenAPI-driven).",

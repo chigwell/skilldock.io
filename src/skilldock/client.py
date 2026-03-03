@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import json
 import sys
 import time
@@ -11,8 +12,26 @@ from urllib.parse import quote
 
 import httpx
 
+try:
+    from rich.console import Console
+except Exception:  # pragma: no cover - optional runtime dependency
+    Console = None  # type: ignore[assignment]
+
 from .config import DEFAULT_OPENAPI_URL, DEFAULT_TIMEOUT_S
 from .openapi import AuthStrategy, OpenAPIOperation, OpenAPISpec, load_openapi, parse_spec
+
+
+def _console_print(*values: Any, sep: str = " ", end: str = "\n", file: Any | None = None, flush: bool = False) -> None:
+    if Console is None:
+        builtins.print(*values, sep=sep, end=end, file=file, flush=flush)
+        return
+
+    target = file if file is not None else sys.stdout
+    text = sep.join(str(v) for v in values)
+    console = Console(file=target, markup=False, highlight=False, soft_wrap=True)
+    console.print(text, end=end)
+    if flush and hasattr(target, "flush"):
+        target.flush()
 
 
 class SkilldockError(RuntimeError):
@@ -267,7 +286,7 @@ class SkilldockClient:
         if self._auth_optional_warning_printed:
             return
         self._auth_optional_warning_printed = True
-        print(f"warning: {message}", file=sys.stderr)
+        _console_print(f"warning: {message}", file=sys.stderr)
 
     def _should_retry_unauthenticated(self, err: SkilldockHTTPError) -> bool:
         if err.status_code in (401, 403):
